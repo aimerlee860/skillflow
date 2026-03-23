@@ -179,15 +179,35 @@ Remember:
         ])
 
         prompt = "\n".join(prompt_parts)
+        prompt += "\n\n**IMPORTANT**: After creating ALL files (SKILL.md, eval.yaml, and any references/scripts), create an empty file named '_DONE' in the skill directory to signal completion. Do NOT respond before creating _DONE."
 
-        # Run the agent
-        result = await self.graph.ainvoke(
-            {"messages": [HumanMessage(content=prompt)]},
-            config={
+        # Run the agent with astream to monitor _DONE file
+        import asyncio
+
+        done_marker = skill_path / "_DONE"
+
+        async def run_with_early_exit():
+            config = {
                 "configurable": {"thread_id": f"skill-creation-{name}"},
                 "recursion_limit": self.max_iterations,
-            },
-        )
+            }
+            async for _ in self.graph.astream(
+                {"messages": [HumanMessage(content=prompt)]},
+                config=config,
+                stream_mode="updates",
+            ):
+                # Exit as soon as _DONE marker appears
+                if done_marker.exists():
+                    break
+
+        try:
+            await asyncio.wait_for(run_with_early_exit(), timeout=180)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            # Clean up the marker file
+            if done_marker.exists():
+                done_marker.unlink()
 
         return skill_path
 
