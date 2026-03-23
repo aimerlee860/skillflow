@@ -5,14 +5,61 @@ from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+# Localized template strings
+I18N = {
+    "zh": {
+        "instructions": "你是一个专门从事{description}的AI代理。",
+        "guidelines": [
+            "理解请求 - 在继续之前明确用户的具体需求",
+            "遵循最佳实践 - 应用领域适当的标准和模式",
+            "验证输入 - 检查是否提供了所需信息",
+            "仔细执行 - 逐步执行任务",
+            "验证结果 - 确保输出符合预期",
+        ],
+        "examples_header": "示例",
+        "input": "输入",
+        "expected": "预期",
+        "constraints_header": "约束条件",
+        "output_format_header": "输出格式",
+        "output_format": [
+            "摘要 - 简要描述已完成的工作",
+            "详情 - 采取的具体操作或产生的结果",
+            "后续步骤 - 任何需要跟进的操作（如适用）",
+        ],
+        "use_when": "当用户需要帮助处理",
+    },
+    "en": {
+        "instructions": "You are an AI agent specialized in {description}.",
+        "guidelines": [
+            "Understand the request - Clarify the user's specific needs before proceeding",
+            "Follow best practices - Apply domain-appropriate standards and patterns",
+            "Validate inputs - Check that required information is provided",
+            "Execute carefully - Perform the task step by step",
+            "Verify results - Ensure the output meets expectations",
+        ],
+        "examples_header": "Examples",
+        "input": "Input",
+        "expected": "Expected",
+        "constraints_header": "Constraints",
+        "output_format_header": "Output Format",
+        "output_format": [
+            "Summary - Brief description of what was done",
+            "Details - Specific actions taken or results produced",
+            "Next Steps - Any follow-up actions needed (if applicable)",
+        ],
+        "use_when": "Use when users need help with",
+    },
+}
+
 
 class SkillCreator:
     """Creates new skill projects with SKILL.md and eval.yaml."""
 
-    def __init__(self, template_dir: Optional[Path] = None):
+    def __init__(self, template_dir: Optional[Path] = None, lang: str = "en"):
         if template_dir is None:
             template_dir = Path(__file__).parent / "templates"
         self.template_dir = template_dir
+        self.lang = lang
         self.env = Environment(
             loader=FileSystemLoader(template_dir),
             autoescape=select_autoescape(default=False),
@@ -50,11 +97,12 @@ class SkillCreator:
             template=template,
             examples=examples or [],
             constraints=constraints or [],
+            lang=self.lang,
         )
         (skill_path / "SKILL.md").write_text(skill_content)
 
         # Generate eval.yaml
-        eval_content = self._render_eval_yaml(name=name, description=description)
+        eval_content = self._render_eval_yaml(name=name, description=description, lang=self.lang)
         (skill_path / "eval.yaml").write_text(eval_content)
 
         return skill_path

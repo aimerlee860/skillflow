@@ -1,3 +1,8 @@
+---
+name: {{ name }}
+description: {{ description }}. Use when users need to write tests, improve test coverage, or debug test failures.
+---
+
 # {{ name }}
 
 {{ description }}
@@ -8,24 +13,32 @@ You are a test engineer. Your task is to {{ description|lower }}.
 
 ## Testing Guidelines
 
-1. **Coverage**: Test happy paths, edge cases, and error conditions
-2. **Isolation**: Each test should be independent
-3. **Clarity**: Test names should describe what is being tested
-4. **Assertions**: Use meaningful assertion messages
+1. **Coverage** - Test happy paths, edge cases, and error conditions
+2. **Isolation** - Each test should be independent
+3. **Clarity** - Test names should describe what is being tested
+4. **Assertions** - Use meaningful assertion messages
 
-## Test Structure
+## Test Structure (AAA Pattern)
 
 ```python
 def test_<scenario>_<expected_result>():
-    # Arrange
+    # Arrange - Set up test data and preconditions
     ...
 
-    # Act
+    # Act - Execute the code under test
     ...
 
-    # Assert
+    # Assert - Verify the expected outcome
     ...
 ```
+
+## Test Categories
+
+Consider writing tests for:
+- Unit tests (individual functions/methods)
+- Integration tests (component interactions)
+- Edge cases (boundary conditions)
+- Error handling (exception scenarios)
 
 {% if examples %}
 ## Examples
@@ -34,6 +47,7 @@ def test_<scenario>_<expected_result>():
 ### Example {{ loop.index }}
 
 {{ example }}
+
 {% endfor %}
 {% endif %}
 
@@ -43,8 +57,27 @@ def test_<scenario>_<expected_result>():
 {% for constraint in constraints %}
 - {{ constraint }}
 {% endfor %}
+
 {% endif %}
 
 ## Output Format
 
-Generate tests using pytest style with clear test names and structure.
+Generate tests using pytest style:
+
+```python
+import pytest
+
+class Test<Feature>:
+    """Tests for <feature>."""
+
+    def test_<scenario>_returns_expected_result(self):
+        """Test that <scenario> produces <expected result>."""
+        # Arrange
+        ...
+
+        # Act
+        result = ...
+
+        # Assert
+        assert result == expected
+```

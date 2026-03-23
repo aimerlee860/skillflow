@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -19,9 +20,25 @@ def create_parser() -> argparse.ArgumentParser:
         description="Skill lifecycle management: create, evaluate, and evolve AI agent skills",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Commands:
+  init      Create skill from template (fast, no LLM needed)
+  create    Create skill using LLM (high quality, needs API key)
+  improve   Improve existing skill with LLM feedback
+  eval      Evaluate a skill against test cases
+  evolve    Automatically evolve a skill
+  preview   Preview evaluation results
+
 Examples:
-  # Create a new skill
+  # Quick skill creation (template-based)
   skillgrade init my-skill --description "Review code for bugs"
+
+  # LLM-powered skill creation
+  skillgrade create python-linter \\
+    --description "Lint Python code for style and errors" \\
+    --example "Check PEP 8 compliance"
+
+  # Improve existing skill
+  skillgrade improve ./my-skill --feedback "Add more error examples"
 
   # Evaluate a skill
   skillgrade eval ./my-skill --trials 5
@@ -29,15 +46,17 @@ Examples:
   # Evolve a skill automatically
   skillgrade evolve ./my-skill --trials 5 --iterations 50
 
-  # Preview results
-  skillgrade preview --results-dir /tmp/skillgrade/my-skill
+Environment Variables:
+  LLM_BASE_URL    API endpoint (e.g., https://api.openai.com/v1)
+  LLM_API_KEY     API key for authentication
+  LLM_MODEL_NAME  Model to use (default: gpt-4o)
         """,
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
     # init command
-    p_init = subparsers.add_parser("init", help="Create a new skill")
+    p_init = subparsers.add_parser("init", help="Create a new skill (template-based)")
     p_init.add_argument(
         "name",
         help="Name of the skill to create",
@@ -75,6 +94,141 @@ Examples:
         action="append",
         dest="constraints",
         help="Add a constraint (can be used multiple times)",
+    )
+
+    # create command (LLM-powered)
+    p_create = subparsers.add_parser(
+        "create",
+        help="Create a skill using LLM (skill-creator powered)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic creation
+  skillgrade create python-linter --description "Lint Python code"
+
+  # With examples and context
+  skillgrade create api-tester \\
+    --description "Test REST APIs" \\
+    --example "Test GET /users endpoint" \\
+    --context "Our API uses OAuth2 authentication"
+
+  # From existing codebase
+  skillgrade create project-helper \\
+    --from-codebase ./my-project \\
+    --description "Help with this project"
+
+  # With custom LLM settings
+  skillgrade create my-skill \\
+    --description "..." \\
+    --base-url https://api.openai.com/v1 \\
+    --model gpt-4o
+        """,
+    )
+    p_create.add_argument(
+        "name",
+        help="Name of the skill to create",
+    )
+    p_create.add_argument(
+        "--description",
+        "-D",
+        required=True,
+        help="Description of what the skill does",
+    )
+    p_create.add_argument(
+        "--dir",
+        "-d",
+        type=Path,
+        default=Path("."),
+        help="Directory to create the skill in (default: current directory)",
+    )
+    p_create.add_argument(
+        "--example",
+        "-e",
+        action="append",
+        dest="examples",
+        help="Add an example use case (can be used multiple times)",
+    )
+    p_create.add_argument(
+        "--context",
+        "-c",
+        type=str,
+        default=None,
+        help="Additional context (code snippets, docs, requirements)",
+    )
+    p_create.add_argument(
+        "--template",
+        "-t",
+        choices=["default", "code-review", "documentation", "testing"],
+        default="default",
+        help="Template style to follow (default: default)",
+    )
+    p_create.add_argument(
+        "--from-codebase",
+        type=Path,
+        default=None,
+        help="Analyze existing codebase to create skill",
+    )
+    # LLM configuration
+    p_create.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="LLM API base URL (default: LLM_BASE_URL env var)",
+    )
+    p_create.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="LLM API key (default: LLM_API_KEY env var)",
+    )
+    p_create.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="Model name (default: LLM_MODEL_NAME env var or gpt-4o)",
+    )
+    p_create.add_argument(
+        "--max-iterations",
+        type=int,
+        default=50,
+        help="Max agent iterations (default: 50)",
+    )
+
+    # improve command (LLM-powered)
+    p_improve = subparsers.add_parser(
+        "improve",
+        help="Improve an existing skill using LLM",
+    )
+    p_improve.add_argument(
+        "skill_dir",
+        type=Path,
+        help="Path to the skill directory to improve",
+    )
+    p_improve.add_argument(
+        "--feedback",
+        "-f",
+        required=True,
+        help="Feedback on what to improve",
+    )
+    p_improve.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="LLM API base URL",
+    )
+    p_improve.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="LLM API key",
+    )
+    p_improve.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="Model name",
     )
 
     # eval command
@@ -246,6 +400,89 @@ def main() -> int:
         print(f"Created skill at: {skill_path}")
         print(f"  - {skill_path / 'SKILL.md'}")
         print(f"  - {skill_path / 'eval.yaml'}")
+
+    elif args.command == "create":
+        from skillforge import SkillCreatorAgent
+
+        # Validate LLM config
+        base_url = args.base_url or os.environ.get("LLM_BASE_URL")
+        api_key = args.api_key or os.environ.get("LLM_API_KEY")
+
+        if not base_url or not api_key:
+            print("Error: LLM configuration required.", file=sys.stderr)
+            print("Set environment variables:", file=sys.stderr)
+            print("  export LLM_BASE_URL=https://api.openai.com/v1", file=sys.stderr)
+            print("  export LLM_API_KEY=sk-xxx", file=sys.stderr)
+            print("Or use --base-url and --api-key options.", file=sys.stderr)
+            return 1
+
+        agent = SkillCreatorAgent(
+            base_url=base_url,
+            api_key=api_key,
+            model_name=args.model,
+            max_iterations=args.max_iterations,
+        )
+
+        if args.from_codebase:
+            # Create from codebase analysis
+            print(f"Analyzing codebase at {args.from_codebase}...")
+
+            async def run_create():
+                return await agent.analyze_codebase_for_skill(
+                    codebase_path=args.from_codebase,
+                    skill_name=args.name,
+                    output_dir=args.dir,
+                )
+
+            skill_path = asyncio.run(run_create())
+        else:
+            # Create from description
+            print(f"Creating skill '{args.name}' using LLM...")
+
+            async def run_create():
+                return await agent.create_skill(
+                    name=args.name,
+                    description=args.description,
+                    output_dir=args.dir,
+                    context=args.context,
+                    examples=args.examples,
+                    template=args.template,
+                )
+
+            skill_path = asyncio.run(run_create())
+
+        print(f"\nSkill created at: {skill_path}")
+        if (skill_path / "SKILL.md").exists():
+            print(f"  - {skill_path / 'SKILL.md'}")
+        if (skill_path / "eval.yaml").exists():
+            print(f"  - {skill_path / 'eval.yaml'}")
+
+    elif args.command == "improve":
+        from skillforge import SkillCreatorAgent
+
+        base_url = args.base_url or os.environ.get("LLM_BASE_URL")
+        api_key = args.api_key or os.environ.get("LLM_API_KEY")
+
+        if not base_url or not api_key:
+            print("Error: LLM configuration required.", file=sys.stderr)
+            return 1
+
+        agent = SkillCreatorAgent(
+            base_url=base_url,
+            api_key=api_key,
+            model_name=args.model,
+        )
+
+        print(f"Improving skill at {args.skill_dir}...")
+
+        async def run_improve():
+            return await agent.improve_skill(
+                skill_path=args.skill_dir,
+                feedback=args.feedback,
+            )
+
+        skill_path = asyncio.run(run_improve())
+        print(f"Skill improved at: {skill_path}")
 
     elif args.command == "eval":
         from .commands import run_eval

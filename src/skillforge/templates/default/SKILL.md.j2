@@ -1,17 +1,23 @@
+---
+name: {{ name }}
+description: {{ description }}{% if examples %}. Use when users need help with{% for example in examples[:2] %} {{ example|lower }}{% if not loop.last %} or{% endif %}{% endfor %}{% endif %}.
+---
+
 # {{ name }}
 
 {{ description }}
 
 ## Instructions
 
-You are an AI agent that should {{ description|lower }}.
+You are an AI agent specialized in {{ description|lower }}.
 
-## Steps
+When invoked, follow these guidelines:
 
-1. Analyze the input and understand the requirements
-2. Plan your approach
-3. Execute the plan
-4. Verify the results
+1. **Understand the request** - Clarify the user's specific needs before proceeding
+2. **Follow best practices** - Apply domain-appropriate standards and patterns
+3. **Validate inputs** - Check that required information is provided
+4. **Execute carefully** - Perform the task step by step
+5. **Verify results** - Ensure the output meets expectations
 
 {% if examples %}
 ## Examples
@@ -19,7 +25,10 @@ You are an AI agent that should {{ description|lower }}.
 {% for example in examples %}
 ### Example {{ loop.index }}
 
-{{ example }}
+**Input**: {{ example }}
+
+**Expected**: Complete the task following the guidelines above.
+
 {% endfor %}
 {% endif %}
 
@@ -29,8 +38,13 @@ You are an AI agent that should {{ description|lower }}.
 {% for constraint in constraints %}
 - {{ constraint }}
 {% endfor %}
+
 {% endif %}
 
 ## Output Format
 
-Provide clear, structured output that can be easily verified.
+Provide clear, structured output that includes:
+
+1. **Summary** - Brief description of what was done
+2. **Details** - Specific actions taken or results produced
+3. **Next Steps** - Any follow-up actions needed (if applicable)

@@ -1,21 +1,27 @@
-# Skillgrade Python
+# Skillflow
 
 Complete skill lifecycle management: **create**, **evaluate**, and **evolve** AI agent skills.
 
-This is a Python rewrite of the original [skillgrade](https://github.com/mgechev/skillgrade) project, with added capabilities for skill creation and autonomous evolution.
+A unified CLI for managing AI agent skills with LLM-powered creation, comprehensive evaluation, and autonomous evolution capabilities.
 
 ## Features
 
-- **Skill Creation (skillforge)**: Generate new skills from templates or existing codebases
-- **Skill Evaluation (skillgrade)**: Test that AI agents correctly discover and use your skills
-- **Skill Evolution (skillevol)**: Automatically improve skills through iterative optimization
-- **OpenAI Functions Agent**: Uses function calling for reliable tool usage
-- **LangGraph Workflow**: State-machine based evaluation pipeline
-- **Dual Graders**: Deterministic (Python) + LLM Rubric evaluation
+- **LLM-Powered Skill Creation**: Generate high-quality skills using LLM with the skill-creator meta-skill
+- **Template Mode**: Fast skill generation without LLM using Jinja2 templates
+- **Multi-Language Support**: Automatic language detection (Chinese/English) - output matches input language
+- **Skill Evaluation**: Test that AI agents correctly discover and use your skills
+- **Skill Evolution**: Automatically improve skills through iterative optimization
+- **LangGraph Workflow**: State-machine based evaluation pipeline with ReAct agent pattern
 
 ## Installation
 
 ```bash
+# Using uv (recommended)
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -e .
+
+# Or using pip
 pip install -e .
 ```
 
@@ -24,111 +30,143 @@ pip install -e .
 ```bash
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="your-api-key"
-export LLM_MODEL_NAME="gpt-4o"
+export LLM_MODEL_NAME="gpt-4o"  # Optional, defaults to gpt-4o
 ```
 
 ## Commands
 
-### init - Create a new skill
+### create - Create a new skill
+
+**LLM mode (default)** - High-quality skill generation using LLM:
 
 ```bash
 # Basic usage
-skillgrade init my-skill --description "Review code for bugs"
+skillflow create bank-transfer --desc "处理银行转账业务"
 
-# With template
-skillgrade init my-skill --description "Review code" --template code-review
+# Long description from file
+skillflow create complex-skill --file ./requirements.md
 
 # With examples and constraints
-skillgrade init my-skill \
-  --description "Review code for bugs" \
-  --example "Review a Python function for security issues" \
-  --constraint "Must identify SQL injection risks"
+skillflow create my-skill \
+  --desc "Review Python code" \
+  --example "Check for SQL injection vulnerabilities" \
+  --constraint "Must follow PEP 8 style"
+
+# From existing codebase
+skillflow create project-helper --file ./README.md --from-codebase ./my-project
+
+# With custom LLM settings
+skillflow create my-skill --desc "..." --model gpt-4o --base-url https://api.openai.com/v1
 ```
 
-Options:
-- `--dir, -d`: Directory to create the skill in (default: current directory)
-- `--description, -D`: Description of what the skill does (required)
-- `--template, -t`: Template to use (default, code-review, documentation, testing)
+**Template mode** - Fast generation without LLM:
+
+```bash
+skillflow create my-skill --desc "Review code" --no-llm
+skillflow create my-skill --desc "Review code" --no-llm --template code-review
+```
+
+**Options:**
+- `--desc, -d`: Brief description of the skill
+- `--file, -f`: Read description from file (for long descriptions)
+- `--no-llm`: Use template mode instead of LLM
+- `--lang, -L`: Output language (auto, zh, en). Default: auto-detect
+- `--dir`: Output directory (default: ./skills)
+- `--template, -t`: Template style (default, code-review, documentation, testing)
 - `--example, -e`: Add an example (can be used multiple times)
 - `--constraint, -C`: Add a constraint (can be used multiple times)
+- `--context, -c`: Additional context for LLM mode
+- `--from-codebase`: Analyze codebase to create skill (LLM mode)
+- `--base-url`: LLM API base URL (default: LLM_BASE_URL env)
+- `--api-key`: LLM API key (default: LLM_API_KEY env)
+- `--model, -m`: Model name (default: LLM_MODEL_NAME env or gpt-4o)
 
 ### eval - Evaluate a skill
 
 ```bash
-skillgrade eval /path/to/skill --trials 5
-skillgrade eval /path/to/skill --config /path/to/eval.yaml
-skillgrade eval /path/to/skill --keep-workspaces
+skillflow eval ./skills/bank-transfer --trials 5
+skillflow eval ./skills/bank-transfer --config ./eval.yaml
+skillflow eval ./skills/bank-transfer --keep-workspaces
+skillflow eval ./skills/bank-transfer --quiet
 ```
+
+**Options:**
+- `--config, -c`: Path to eval.yaml configuration
+- `--trials, -n`: Number of trials per task (default: 5)
+- `--output, -o`: Output directory for results
+- `--keep-workspaces`: Keep workspace copies for debugging
+- `--quiet, -q`: Suppress output
 
 ### evolve - Automatically improve a skill
 
 ```bash
 # Basic usage
-skillgrade evolve /path/to/skill --trials 5 --iterations 50
+skillflow evolve ./skills/bank-transfer --trials 5 --iterations 50
 
 # With custom strategy
-skillgrade evolve /path/to/skill --strategy autonomous --llm-model gpt-4o
+skillflow evolve ./skills/bank-transfer --strategy autonomous --model gpt-4o
 
 # All options
-skillgrade evolve /path/to/skill \
+skillflow evolve ./skills/bank-transfer \
   --trials 5 \
   --iterations 100 \
   --max-time 3600 \
   --patience 20 \
   --strategy hybrid \
-  --program program.md \
-  --llm-model gpt-4o \
+  --model gpt-4o \
+  --keep-workspace \
   --verbose
 ```
 
-Options:
+**Options:**
+- `--config, -c`: Path to eval.yaml configuration
 - `--trials, -n`: Evaluation trials per iteration (default: 5)
 - `--iterations, -i`: Maximum iterations (default: 100)
 - `--max-time, -t`: Max time in seconds (default: 3600)
 - `--patience, -p`: Stop after N no-improvements (default: 20)
-- `--strategy, -s`: Exploration strategy: hybrid, autonomous, structured
-- `--program`: Path to custom program.md
-- `--llm-model, -m`: LLM model name (default: gpt-4o)
+- `--strategy, -s`: Exploration strategy (hybrid, autonomous, structured)
+- `--model`: LLM model for evolution (default: gpt-4o)
 - `--keep-workspace`: Keep workspaces after completion
 - `--verbose, -v`: Verbose output
-
-### preview - View evaluation results
-
-```bash
-skillgrade preview [--results-dir PATH] [--browser]
-```
 
 ## Project Structure
 
 ```
 src/
-├── skillgrade/       # Core evaluation framework
-│   ├── commands/     # CLI commands (eval, preview)
-│   ├── core/         # Config, runner, workspace management
-│   ├── agents/       # OpenAI Functions Agent
-│   ├── graph/        # LangGraph evaluation workflow
-│   ├── tools/        # Agent tools (shell, file, glob)
-│   ├── graders/      # Deterministic and LLM graders
-│   ├── providers/    # Local execution environment
-│   └── reporters/    # CLI and browser reporters
-│
-├── skillforge/       # Skill creation module
-│   ├── creator.py    # Skill creator logic
-│   └── templates/    # Skill templates
+├── cli.py             # Unified CLI entry point
+
+├── skillforge/        # Skill creation module
+│   ├── __init__.py
+│   ├── creator.py         # Template-based skill creator
+│   ├── agent_creator.py   # LLM-powered skill creator (ReAct agent)
+│   ├── skills/            # Built-in skills
+│   │   └── skill-creator/     # Meta-skill for creating other skills
+│   └── templates/         # Skill templates
 │       ├── default/
 │       ├── code-review/
 │       ├── documentation/
 │       └── testing/
-│
-└── skillevol/        # Skill evolution module
-    ├── commands.py   # Evolution CLI logic
-    ├── core/         # Core evolution components
-    │   ├── llm.py        # LLM client wrapper
-    │   ├── types.py      # Type definitions
-    │   ├── explorer.py   # Modification proposer
-    │   ├── evaluator.py  # Runs skillgrade
-    │   └── decision.py   # Keep/revert decisions
-    └── operators/    # Skill modification operators
+
+├── skillgrade/        # Skill evaluation module
+│   ├── cli.py
+│   ├── commands/         # CLI commands
+│   ├── core/             # Config, runner, workspace
+│   ├── agents/           # Agent implementations
+│   ├── graph/            # LangGraph workflow
+│   ├── tools/            # Agent tools
+│   ├── graders/          # Evaluation graders
+│   ├── providers/        # Execution providers
+│   └── reporters/        # Result reporters
+
+└── skillevol/         # Skill evolution module
+    ├── commands.py       # Evolution CLI
+    ├── core/             # Core components
+    │   ├── llm.py
+    │   ├── types.py
+    │   ├── explorer.py
+    │   ├── evaluator.py
+    │   └── decision.py
+    └── operators/        # Skill modification operators
         ├── clarify.py
         ├── add_examples.py
         └── enhance_constraints.py
@@ -138,11 +176,46 @@ src/
 
 ```
 ┌─────────┐     ┌─────────┐     ┌─────────┐
-│  init   │ ──▶ │   eval  │ ──▶ │ evolve  │
-│ (create)│     │  (test) │     │ (improve)│
+│ create  │ ──▶ │   eval  │ ──▶ │ evolve  │
+│  (LLM)  │     │  (test) │     │ (improve)│
 └─────────┘     └─────────┘     └─────────┘
                     ▲                 │
                     └─────────────────┘
+                      (iterate & refine)
+```
+
+## Generated Skill Structure
+
+When you run `skillflow create`, it generates:
+
+```
+skills/my-skill/
+├── SKILL.md           # Main skill file with YAML frontmatter
+├── eval.yaml          # Test cases for evaluation
+├── references/        # Optional: detailed documentation
+│   ├── formats.md
+│   └── guidelines.md
+└── scripts/           # Optional: helper scripts
+    └── helper.py
+```
+
+## SKILL.md Format
+
+```markdown
+---
+name: my-skill
+description: What this skill does. Use when users need to...
+---
+
+# My Skill
+
+Detailed instructions for the AI agent...
+
+## Examples
+...
+
+## Constraints
+...
 ```
 
 ## eval.yaml Configuration
@@ -159,34 +232,52 @@ defaults:
   grader_model: gpt-4o
 
 tasks:
-  - name: example-task
-    instruction: |
+  - name: basic-task
+    prompt: |
       Describe what the agent should do.
     workspace:
-      - src: fixtures/test.js
-        dest: test.js
+      files:
+        test.txt: |
+          Sample input content
+    expect:
+      exit_code: 0
     graders:
-      - type: deterministic
-        run: |
-          import json
-          print(json.dumps({"score": 1.0, "details": "All checks passed"}))
-        weight: 0.7
       - type: llm_rubric
         rubric: |
-          Evaluate the agent's approach.
-        weight: 0.3
+          Evaluate whether the agent correctly completed the task.
+          Score 1.0 for success, 0.5 for partial, 0.0 for failure.
+        weight: 1.0
 ```
 
-## Evolution Metric
+## Language Support
 
-The optimization target is the **Combined Score**:
+Skillflow automatically detects the input language:
 
+```bash
+# Chinese input → Chinese output
+skillflow create bank-transfer --desc "处理银行转账业务"
+
+# English input → English output
+skillflow create bank-transfer --desc "Process bank transfers"
+
+# Override language detection
+skillflow create my-skill --desc "处理转账" --lang en
 ```
-Combined Score = pass_rate × (1 + pass_at_k) / 2
-```
 
-- `pass_rate`: Average evaluation score
-- `pass_at_k`: Probability of at least one success in k trials
+## Dependencies
+
+- **langchain** / **langgraph**: Agent framework and workflow
+- **langchain-openai**: OpenAI LLM integration
+- **jinja2**: Template engine for skill generation
+- **pyyaml**: YAML configuration parsing
+- **httpx**: HTTP client
+- **rich** / **typer**: CLI formatting
+- **anthropic** / **openai**: LLM API clients
+
+## Requirements
+
+- Python >= 3.12
+- OpenAI-compatible API (OpenAI, Azure, or self-hosted)
 
 ## License
 
