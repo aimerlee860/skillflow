@@ -1,0 +1,30 @@
+version: "1"
+
+defaults:
+  agent: openai
+  provider: local
+  trials: 5
+  timeout: 300
+  threshold: 0.8
+  grader_model: gpt-4o
+
+tasks:
+  - name: review-simple-function
+    instruction: |
+      Review the following code for bugs and improvements:
+      ```python
+      def calculate_average(numbers):
+          sum = 0
+          for i in range(len(numbers)):
+              sum = sum + numbers[i]
+          return sum / len(numbers)
+      ```
+    workspace: []
+    graders:
+      - type: llm_rubric
+        rubric: |
+          Evaluate the code review quality:
+          - Did it identify the variable shadowing issue with `sum`?
+          - Did it mention division by zero risk?
+          - Did it suggest using `sum()` built-in or statistics.mean?
+        weight: 1.0

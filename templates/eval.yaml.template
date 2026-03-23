@@ -1,0 +1,45 @@
+# Skillgrade Evaluation Configuration
+# Generated template - customize for your skill
+#
+# Documentation: https://github.com/mgechev/skillgrade#readme
+
+version: "1"
+
+defaults:
+  agent: openai          # openai only in Python version
+  provider: local        # local only
+  trials: 5              # number of independent runs per task
+  timeout: 300           # seconds before agent is killed
+  threshold: 0.8         # minimum pass rate for --ci mode
+  grader_model: gpt-4o   # default LLM grader model
+
+tasks:
+  - name: example-task
+    instruction: |
+      TODO: Describe what the agent should do.
+      Be specific about expected outputs and files.
+
+    workspace: []
+      # - src: fixtures/test-file.js
+      #   dest: test.js
+
+    graders:
+      - type: deterministic
+        run: |
+          # Python grader must output JSON to stdout:
+          # {"score": 0.0-1.0, "details": "...", "checks": [...]}
+          import json
+          print(json.dumps({
+              "score": 0.0,
+              "details": "TODO: implement grader",
+              "checks": []
+          }))
+        weight: 0.7
+
+      - type: llm_rubric
+        rubric: |
+          # Evaluate the agent's approach:
+          # - Did the agent follow the correct workflow?
+          # - Did it use appropriate tools?
+          # - Was it efficient?
+        weight: 0.3

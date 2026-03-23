@@ -1,0 +1,36 @@
+# {{ name }}
+
+{{ description }}
+
+## Instructions
+
+You are an AI agent that should {{ description|lower }}.
+
+## Steps
+
+1. Analyze the input and understand the requirements
+2. Plan your approach
+3. Execute the plan
+4. Verify the results
+
+{% if examples %}
+## Examples
+
+{% for example in examples %}
+### Example {{ loop.index }}
+
+{{ example }}
+{% endfor %}
+{% endif %}
+
+{% if constraints %}
+## Constraints
+
+{% for constraint in constraints %}
+- {{ constraint }}
+{% endfor %}
+{% endif %}
+
+## Output Format
+
+Provide clear, structured output that can be easily verified.
