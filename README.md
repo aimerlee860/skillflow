@@ -84,18 +84,38 @@ skillflow create my-skill --desc "Review code" --no-llm --template code-review
 ### eval - Evaluate a skill
 
 ```bash
-skillflow eval ./skills/bank-transfer --trials 5
-skillflow eval ./skills/bank-transfer --config ./eval.yaml
-skillflow eval ./skills/bank-transfer --keep-workspaces
+# Generate eval.yaml and evaluate (default behavior)
+skillflow eval ./skills/bank-transfer
+
+# Only generate eval.yaml, do not evaluate
+skillflow eval ./skills/bank-transfer --init
+
+# Generate eval.yaml to custom location
+skillflow eval ./skills/bank-transfer --init --target ./custom-eval.yaml
+
+# Evaluate with existing eval.yaml (skip generation)
+skillflow eval ./skills/bank-transfer --skip-init
+
+# Use specific eval.yaml file
+skillflow eval ./skills/bank-transfer --skip-init --config ./custom-eval.yaml
+
+# Other options
+skillflow eval ./skills/bank-transfer --trials 5 --keep-workspaces
 skillflow eval ./skills/bank-transfer --quiet
 ```
 
 **Options:**
-- `--config, -c`: Path to eval.yaml configuration
+- `--init`: Only generate eval.yaml, do not evaluate
+- `--skip-init`: Skip eval.yaml generation, use existing file
+- `--config, -c`: Path to eval.yaml to use (with --skip-init)
+- `--target, -t`: Path to generate eval.yaml (only with --init)
 - `--trials, -n`: Number of trials per task (default: 5)
 - `--output, -o`: Output directory for results
 - `--keep-workspaces`: Keep workspace copies for debugging
 - `--quiet, -q`: Suppress output
+- `--base-url`: LLM API base URL for eval.yaml generation
+- `--api-key`: LLM API key for eval.yaml generation
+- `--model, -m`: Model name for eval.yaml generation (default: gpt-4o)
 
 ### evolve - Automatically improve a skill
 
@@ -150,7 +170,7 @@ src/
 ├── skillgrade/        # Skill evaluation module
 │   ├── cli.py
 │   ├── commands/         # CLI commands
-│   ├── core/             # Config, runner, workspace
+│   ├── core/             # Config, runner, workspace, eval_config
 │   ├── agents/           # Agent implementations
 │   ├── graph/            # LangGraph workflow
 │   ├── tools/            # Agent tools
@@ -175,14 +195,21 @@ src/
 ## Skill Lifecycle
 
 ```
-┌─────────┐     ┌─────────┐     ┌─────────┐
-│ create  │ ──▶ │   eval  │ ──▶ │ evolve  │
-│  (LLM)  │     │  (test) │     │ (improve)│
-└─────────┘     └─────────┘     └─────────┘
-                    ▲                 │
-                    └─────────────────┘
-                      (iterate & refine)
+┌─────────────┐     ┌─────────────────┐     ┌─────────┐
+│   create    │ ──▶ │      eval       │ ──▶ │ evolve  │
+│ (SKILL.md)  │     │ (eval.yaml +    │     │(improve)│
+│             │     │  evaluation)    │     │         │
+└─────────────┘     └─────────────────┘     └─────────┘
+                            ▲                     │
+                            └─────────────────────┘
+                              (iterate & refine)
 ```
+
+**Workflow:**
+
+1. `skillflow create my-skill --desc "..."` → Creates SKILL.md
+2. `skillflow eval ./skills/my-skill` → Generates eval.yaml and evaluates
+3. `skillflow evolve ./skills/my-skill` → Automatically improves the skill
 
 ## Generated Skill Structure
 
@@ -191,12 +218,20 @@ When you run `skillflow create`, it generates:
 ```
 skills/my-skill/
 ├── SKILL.md           # Main skill file with YAML frontmatter
-├── eval.yaml          # Test cases for evaluation
 ├── references/        # Optional: detailed documentation
 │   ├── formats.md
 │   └── guidelines.md
 └── scripts/           # Optional: helper scripts
     └── helper.py
+```
+
+When you run `skillflow eval`, it generates `eval.yaml`:
+
+```
+skills/my-skill/
+├── SKILL.md           # Created by 'skillflow create'
+├── eval.yaml          # Created by 'skillflow eval' (or 'skillflow eval --init')
+└── ...
 ```
 
 ## SKILL.md Format

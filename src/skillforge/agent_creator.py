@@ -152,34 +152,20 @@ Remember:
             f"",
             f"**IMPORTANT - Language Requirement**:",
             f"Detect the language used in the description and examples above.",
-            f"Write ALL content (SKILL.md, eval.yaml, comments) in the SAME language as the input.",
+            f"Write ALL content (SKILL.md, comments, documentation) in the SAME language as the input.",
             f"If the description is in Chinese, write everything in Chinese.",
             f"If the description is in English, write everything in English.",
             f"",
             f"Please follow the skill-creator process:",
             f"1. Understand the intent and ask clarifying questions if needed",
             f"2. Create the SKILL.md with proper YAML frontmatter (name, description fields)",
-            f"3. Create the eval.yaml file with 2-3 test tasks for validation",
-            f"4. Add any necessary bundled resources (scripts/, references/, assets/)",
-            f"",
-            f"**eval.yaml format**:",
-            f"```yaml",
-            f"tasks:",
-            f"  - name: <task_name>",
-            f"    prompt: |",
-            f"      <test prompt for the skill>",
-            f"    workspace:",
-            f"      files:",
-            f"        <filename>: <content>",
-            f"    expect:",
-            f"      exit_code: 0",
-            f"```",
+            f"3. Add any necessary bundled resources (scripts/, references/, assets/)",
             f"",
             f"Create the skill files in: {skill_path}",
         ])
 
         prompt = "\n".join(prompt_parts)
-        prompt += "\n\n**IMPORTANT**: After creating ALL files (SKILL.md, eval.yaml, and any references/scripts), create an empty file named '_DONE' in the skill directory to signal completion. Do NOT respond before creating _DONE."
+        prompt += "\n\n**IMPORTANT**: After creating ALL files (SKILL.md and any references/scripts), create an empty file named '_DONE' in the skill directory to signal completion. Do NOT respond before creating _DONE."
 
         # Run the agent with astream to monitor _DONE file
         import asyncio

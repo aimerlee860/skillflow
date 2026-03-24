@@ -1,4 +1,4 @@
-"""Skill creator - generates SKILL.md and eval.yaml files."""
+"""Skill creator - generates SKILL.md files."""
 
 from pathlib import Path
 from typing import Optional
@@ -53,7 +53,7 @@ I18N = {
 
 
 class SkillCreator:
-    """Creates new skill projects with SKILL.md and eval.yaml."""
+    """Creates new skill projects with SKILL.md."""
 
     def __init__(self, template_dir: Optional[Path] = None, lang: str = "en"):
         if template_dir is None:
@@ -74,7 +74,7 @@ class SkillCreator:
         examples: Optional[list[str]] = None,
         constraints: Optional[list[str]] = None,
     ) -> Path:
-        """Create a new skill directory with SKILL.md and eval.yaml.
+        """Create a new skill directory with SKILL.md only.
 
         Args:
             skill_dir: Parent directory where the skill will be created
@@ -97,13 +97,8 @@ class SkillCreator:
             template=template,
             examples=examples or [],
             constraints=constraints or [],
-            lang=self.lang,
         )
         (skill_path / "SKILL.md").write_text(skill_content)
-
-        # Generate eval.yaml
-        eval_content = self._render_eval_yaml(name=name, description=description, lang=self.lang)
-        (skill_path / "eval.yaml").write_text(eval_content)
 
         return skill_path
 
@@ -159,11 +154,6 @@ class SkillCreator:
             examples=examples,
             constraints=constraints,
         )
-
-    def _render_eval_yaml(self, name: str, description: str) -> str:
-        """Render eval.yaml from template."""
-        tmpl = self.env.get_template("default/eval.yaml.j2")
-        return tmpl.render(name=name, description=description)
 
     def _analyze_codebase(self, codebase_path: Path) -> dict:
         """Analyze codebase to infer skill structure."""

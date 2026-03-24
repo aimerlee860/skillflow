@@ -143,17 +143,54 @@ Examples:
     )
 
     # ========== eval command ==========
-    p_eval = subparsers.add_parser("eval", help="Evaluate a skill against test cases")
+    p_eval = subparsers.add_parser(
+        "eval",
+        help="Evaluate a skill against test cases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Generate eval.yaml and evaluate
+  skillflow eval ./skills/my-skill
+
+  # Only generate eval.yaml (no evaluation)
+  skillflow eval ./skills/my-skill --init
+
+  # Evaluate with existing eval.yaml (skip generation)
+  skillflow eval ./skills/my-skill --skip-init
+
+  # Use specific eval.yaml file
+  skillflow eval ./skills/my-skill --skip-init --config ./custom-eval.yaml
+
+  # Generate eval.yaml to custom location
+  skillflow eval ./skills/my-skill --init --target ./custom-eval.yaml
+        """,
+    )
     p_eval.add_argument(
         "skill_dir",
         type=Path,
         help="Path to skill directory (must contain SKILL.md)",
     )
     p_eval.add_argument(
+        "--init",
+        action="store_true",
+        help="Only generate eval.yaml, do not evaluate",
+    )
+    p_eval.add_argument(
+        "--skip-init",
+        action="store_true",
+        help="Skip eval.yaml generation, use existing file",
+    )
+    p_eval.add_argument(
         "--config", "-c",
         type=Path,
         dest="config_path",
-        help="Path to eval.yaml configuration",
+        help="Path to eval.yaml to use (with --skip-init)",
+    )
+    p_eval.add_argument(
+        "--target", "-t",
+        type=Path,
+        dest="target_path",
+        help="Path to generate eval.yaml (only with --init)",
     )
     p_eval.add_argument(
         "--trials", "-n",
@@ -176,6 +213,18 @@ Examples:
         "--quiet", "-q",
         action="store_true",
         help="Suppress output",
+    )
+    p_eval.add_argument(
+        "--base-url",
+        help="LLM API base URL for eval.yaml generation",
+    )
+    p_eval.add_argument(
+        "--api-key",
+        help="LLM API key for eval.yaml generation",
+    )
+    p_eval.add_argument(
+        "--model", "-m",
+        help="Model name for eval.yaml generation (default: gpt-4o)",
     )
 
     # ========== evolve command ==========
@@ -314,7 +363,6 @@ def _create_from_template(args) -> int:
 
     print(f"✓ Created skill at: {skill_path}")
     print(f"  - {skill_path / 'SKILL.md'}")
-    print(f"  - {skill_path / 'eval.yaml'}")
     return 0
 
 
@@ -358,41 +406,52 @@ async def _create_with_llm(args) -> int:
             template=args.template,
         )
 
-    # Ensure eval.yaml exists (create from template if not)
-    eval_path = skill_path / "eval.yaml"
-    if not eval_path.exists():
-        # Read description from generated SKILL.md for eval.yaml
-        skill_md_path = skill_path / "SKILL.md"
-        description = args._description
-        if skill_md_path.exists():
-            content = skill_md_path.read_text()
-            # Extract description from frontmatter if available
-            import re
-            match = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
-            if match:
-                description = match.group(1).strip()
-
-        # Create basic eval.yaml from template
-        creator = SkillCreator()
-        eval_content = creator._render_eval_yaml(name=args.name, description=description)
-        eval_path.write_text(eval_content)
-
     print(f"\n✓ Created skill at: {skill_path}")
     if (skill_path / "SKILL.md").exists():
         print(f"  - {skill_path / 'SKILL.md'}")
-    print(f"  - {skill_path / 'eval.yaml'}")
     return 0
 
 
 def handle_eval(args) -> int:
     """Handle eval command."""
     from skillgrade.commands import run_eval
+    skill_dir: Path = args.skill_dir
+    skill_md = skill_dir / "SKILL.md"
 
+    if not skill_md.exists():
+        print(f"Error: SKILL.md not found in {skill_dir}", file=sys.stderr)
+        return 1
+
+    # Determine eval.yaml path
+    if args.init and args.target_path:
+        eval_path = args.target_path
+    elif args.config_path:
+        eval_path = args.config_path
+    else:
+        eval_path = skill_dir / "eval.yaml"
+
+    # Handle --init (only generate eval.yaml)
+    if args.init:
+        _generate_eval_yaml(skill_md, eval_path, args)
+        print(f"✓ Generated eval.yaml at: {eval_path}")
+        return 0
+
+    # Handle --skip-init or normal mode
+    if args.skip_init:
+        # Use specified or default eval.yaml without generating
+        if args.config_path:
+            eval_path = args.config_path
+        # else: use skill_dir/eval.yaml
+    else:
+        # Default: generate eval.yaml before evaluation
+        _generate_eval_yaml(skill_md, eval_path, args)
+
+    # Run evaluation
     asyncio.run(
         run_eval(
             skill_dir=args.skill_dir,
             trials=args.trials,
-            config_path=args.config_path,
+            config_path=eval_path,
             output_dir=args.output_dir,
             keep_workspaces=args.keep_workspaces,
             quiet=args.quiet,
@@ -400,6 +459,27 @@ def handle_eval(args) -> int:
         )
     )
     return 0
+
+
+def _generate_eval_yaml(skill_md: Path, eval_path: Path, args) -> None:
+    """Generate eval.yaml using LLM."""
+    import re
+
+    # Read skill content
+    skill_content = skill_md.read_text()
+
+    # Extract name and description from frontmatter
+    name_match = re.search(r"^name:\s*(.+)$", skill_content, re.MULTILINE)
+    desc_match = re.search(r"^description:\s*(.+)$", skill_content, re.MULTILINE)
+
+    name = name_match.group(1).strip() if name_match else skill_md.parent.name
+    description = desc_match.group(1).strip() if desc_match else ""
+
+    # Use EvalConfigGenerator to generate eval.yaml
+    from skillgrade.core.eval_config import EvalConfigGenerator
+
+    generator = EvalConfigGenerator()
+    generator.generate_to_file(name=name, description=description, output_path=eval_path)
 
 
 def handle_evolve(args) -> int:
