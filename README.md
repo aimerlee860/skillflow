@@ -21,9 +21,15 @@ uv venv --python 3.12
 source .venv/bin/activate
 uv pip install -e .
 
-# Or using pip
-pip install -e .
+# Or install from wheel
+uv pip install dist/skillflow-0.1.0-py3-none-any.whl --force-reinstall
 ```
+
+> **Note**: Due to the `src/` layout structure, the `cli.py` entry point requires proper packaging configuration. If you encounter `ModuleNotFoundError: No module named 'cli'`, reinstall from wheel:
+> ```bash
+> uv build --wheel
+> uv pip install dist/skillflow-0.1.0-py3-none-any.whl --force-reinstall
+> ```
 
 ## Environment Variables
 
