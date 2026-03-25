@@ -34,12 +34,40 @@ class AddExamplesOperator:
 
         performance_context = ""
         if current_result:
+            issues = current_result.diagnose_issues()
+            issues_str = ", ".join(issues) if issues else "None detected"
+
             performance_context = f"""
 ## Current Performance
+
+### TASK Metrics
 - pass_rate: {current_result.pass_rate:.2%}
-- The agent {"struggles with this task" if current_result.pass_rate < 0.5 else "performs reasonably well"}
-- Add examples that help agents {"overcome difficulties" if current_result.pass_rate < 0.5 else "achieve higher quality results"}
+- pass_at_k: {current_result.pass_at_k:.2%}
+- pass_pow_k: {current_result.pass_pow_k:.2%}
+- reward: {current_result.reward:.2f}
+
+### SKILL Metrics
+- access_rate: {current_result.access_rate:.2%}
+- deep_usage_rate: {current_result.deep_usage_rate:.2%}
+- false_positive_rate: {current_result.false_positive_rate:.2%}
+- effective_usage_rate: {current_result.effective_usage_rate:.2%}
+
+### Diagnosed Issues: {issues_str}
+
+### Example Strategy:
 """
+
+            # Add specific guidance based on issues
+            if "unstable" in issues:
+                performance_context += "- Results are inconsistent. Add examples showing correct approach.\n"
+            if "shallow_usage" in issues:
+                performance_context += "- Skill not fully utilized. Add examples demonstrating full skill usage.\n"
+            if "ineffective_usage" in issues:
+                performance_context += "- Usage not effective. Add examples of successful task completion.\n"
+            if current_result.pass_rate < 0.5:
+                performance_context += "- Low success rate. Focus on common failure scenarios.\n"
+            else:
+                performance_context += "- Decent success rate. Add edge case examples for improvement.\n"
 
         return f"""Add {num_examples} high-quality, relevant examples to the following SKILL.md.
 
@@ -48,6 +76,7 @@ Examples should:
 2. Show input/output when applicable
 3. Demonstrate edge cases
 4. Match the style of the existing content
+5. Help overcome diagnosed issues
 
 {performance_context}
 ## Original SKILL.md

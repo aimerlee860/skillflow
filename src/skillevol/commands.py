@@ -132,9 +132,27 @@ async def run_evolve(
                 task, description=f"Iteration {state.iteration + 1} | Score: {state.best_score:.3f}"
             )
 
+            # Get the most recent evaluation result for diagnostics
+            current_result = baseline_result
+            if state.experiment_history:
+                # Use the most recent result from history
+                latest_record = state.experiment_history[-1]
+                current_result = EvalResult(
+                    pass_rate=latest_record.pass_rate,
+                    pass_at_k=latest_record.pass_at_k,
+                    pass_pow_k=latest_record.pass_pow_k,
+                    reward=latest_record.reward,
+                    access_rate=latest_record.access_rate,
+                    deep_usage_rate=latest_record.deep_usage_rate,
+                    false_positive_rate=latest_record.false_positive_rate,
+                    effective_usage_rate=latest_record.effective_usage_rate,
+                    quality_score=latest_record.quality_score,
+                )
+                current_result.combined_score = latest_record.combined_score
+
             new_skill_md, op_type, changes_summary = explorer.propose(
                 state.current_skill_md,
-                baseline_result if state.iteration == 0 else None,
+                current_result,
                 [r for _, r in _get_history_results(state)],
                 state.consecutive_no_improve,
             )
@@ -166,6 +184,8 @@ async def run_evolve(
                 if verbose:
                     console.print(f"  Operator: {op_type.value}")
                     console.print(f"  Changes: {changes_summary}")
+                # Track operator effectiveness
+                explorer.record_operator_result(op_type, improved=True)
             else:
                 status = (
                     "[yellow]→ Neutral[/yellow]"
@@ -173,6 +193,8 @@ async def run_evolve(
                     else "[red]✗ Reverted[/red]"
                 )
                 console.print(f"\n{status} {new_result.combined_score:.3f}")
+                # Track operator effectiveness (neutral counts as not improved)
+                explorer.record_operator_result(op_type, improved=False)
 
             state = new_state
             state.iteration += 1
@@ -207,18 +229,25 @@ def _get_history_results(state: EvolState) -> list[tuple[str, EvalResult]]:
 
 
 def _write_results_header(path: Path) -> None:
-    """Write TSV header."""
-    path.write_text(
-        "experiment_id\ttimestamp\toperator\tpass_rate\tpass_at_k\tcombined_score\tchanges_summary\n"
+    """Write TSV header with all metrics."""
+    header = (
+        "experiment_id\ttimestamp\toperator\t"
+        "pass_rate\tpass_at_k\tpass_pow_k\treward\t"
+        "access_rate\tdeep_usage_rate\tfalse_positive_rate\teffective_usage_rate\tquality_score\t"
+        "combined_score\tchanges_summary\n"
     )
+    path.write_text(header)
 
 
 def _write_result_row(path: Path, record) -> None:
-    """Write a result row to TSV."""
+    """Write a result row to TSV with all metrics."""
     with open(path, "a") as f:
         f.write(
             f"{record.experiment_id}\t{record.timestamp.isoformat()}\t{record.operator_type.value}\t"
-            f"{record.pass_rate:.4f}\t{record.pass_at_k:.4f}\t{record.combined_score:.4f}\t{record.changes_summary}\n"
+            f"{record.pass_rate:.4f}\t{record.pass_at_k:.4f}\t{record.pass_pow_k:.4f}\t{record.reward:.4f}\t"
+            f"{record.access_rate:.4f}\t{record.deep_usage_rate:.4f}\t{record.false_positive_rate:.4f}\t"
+            f"{record.effective_usage_rate:.4f}\t{record.quality_score:.4f}\t"
+            f"{record.combined_score:.4f}\t{record.changes_summary}\n"
         )
 
 

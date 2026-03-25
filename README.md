@@ -9,8 +9,8 @@ A unified CLI for managing AI agent skills with LLM-powered creation, comprehens
 - **LLM-Powered Skill Creation**: Generate high-quality skills using LLM with the skill-creator meta-skill
 - **Template Mode**: Fast skill generation without LLM using Jinja2 templates
 - **Multi-Language Support**: Automatic language detection (Chinese/English) - output matches input language
-- **Skill Evaluation**: Test that AI agents correctly discover and use your skills
-- **Skill Evolution**: Automatically improve skills through iterative optimization
+- **Comprehensive Evaluation**: TASK-level and SKILL-level metrics with skill tracking
+- **Autonomous Evolution**: AI-driven skill improvement with intelligent operator selection
 - **LangGraph Workflow**: State-machine based evaluation pipeline with ReAct agent pattern
 
 ## Installation
@@ -96,9 +96,6 @@ skillflow eval ./skills/bank-transfer
 # Only generate eval.yaml, do not evaluate
 skillflow eval ./skills/bank-transfer --init
 
-# Generate eval.yaml to custom location
-skillflow eval ./skills/bank-transfer --init --target ./custom-eval.yaml
-
 # Evaluate with existing eval.yaml (skip generation)
 skillflow eval ./skills/bank-transfer --skip-init
 
@@ -155,6 +152,76 @@ skillflow evolve ./skills/bank-transfer \
 - `--keep-workspace`: Keep workspaces after completion
 - `--verbose, -v`: Verbose output
 
+## Evaluation Metrics
+
+Skillflow uses a two-tier metric system for comprehensive skill evaluation:
+
+### TASK-level Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `pass_rate` | Single trial success rate |
+| `pass_at_k` | Probability of at least 1 success in K trials |
+| `pass_pow_k` | Probability of all K trials succeeding |
+| `reward` | Weighted average score from graders |
+
+### SKILL-level Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `access_rate` | Trigger accuracy - how often the skill is used when appropriate |
+| `deep_usage_rate` | How deeply the skill content is utilized |
+| `false_positive_rate` | How often the skill is triggered inappropriately |
+| `effective_usage_rate` | Overall effectiveness of skill usage |
+| `quality_score` | Comprehensive quality score combining all factors |
+
+### Combined Score Calculation
+
+```
+combined_score =
+    0.25 × pass_pow_k +      # Consistency (most important)
+    0.15 × pass_at_k +        # Reliability
+    0.15 × reward +           # Output quality
+    0.20 × trigger_accuracy + # access_rate × (1 - false_positive_rate)
+    0.15 × usage_depth +      # effective_usage_rate × (1 + deep_usage_rate) / 2
+    0.10 × quality_score      # Overall quality
+```
+
+## Skill Evolution System
+
+### Evolution Strategies
+
+1. **hybrid** (default): Structured operators first, then autonomous exploration
+2. **autonomous**: LLM freely explores improvements
+3. **structured**: Only use predefined operators
+
+### Operators
+
+| Operator | Purpose | When Used |
+|----------|---------|-----------|
+| `CLARIFY` | Improve instruction clarity | Low reliability, under-triggering |
+| `ADD_EXAMPLES` | Add concrete examples | Unstable results, shallow usage |
+| `ENHANCE_CONSTRAINTS` | Strengthen requirements | Inconsistency, over-triggering |
+| `AUTONOMOUS` | Free-form LLM exploration | After 3+ consecutive no-improvements |
+
+### Intelligent Operator Selection
+
+The system diagnoses issues based on metrics and selects the most appropriate operator:
+
+```
+Diagnosed Issue          → Recommended Operator(s)
+─────────────────────────────────────────────────────
+low_reliability          → CLARIFY (2x), ADD_EXAMPLES (1.5x)
+unstable                 → ADD_EXAMPLES (2x), CLARIFY (1.3x)
+inconsistent             → ENHANCE_CONSTRAINTS (2x)
+over_triggering          → ENHANCE_CONSTRAINTS (2.5x)
+under_triggering         → CLARIFY (2x)
+shallow_usage            → ADD_EXAMPLES (2x), CLARIFY (1.5x)
+ineffective_usage        → ADD_EXAMPLES (2x), ENHANCE_CONSTRAINTS (1.5x)
+```
+
+Operator effectiveness is tracked throughout evolution to improve future selections.
+
 ## Project Structure
 
 ```
@@ -176,22 +243,23 @@ src/
 ├── skillgrade/        # Skill evaluation module
 │   ├── cli.py
 │   ├── commands/         # CLI commands
-│   ├── core/             # Config, runner, workspace, eval_config
+│   ├── core/             # Config, metrics, skill_tracking
+│   │   ├── metrics.py        # Metric definitions
+│   │   ├── skill_tracking.py # Skill file access tracking
+│   │   └── skill_stats.py    # Skill statistics
 │   ├── agents/           # Agent implementations
 │   ├── graph/            # LangGraph workflow
 │   ├── tools/            # Agent tools
 │   ├── graders/          # Evaluation graders
-│   ├── providers/        # Execution providers
 │   └── reporters/        # Result reporters
 
 └── skillevol/         # Skill evolution module
     ├── commands.py       # Evolution CLI
     ├── core/             # Core components
-    │   ├── llm.py
-    │   ├── types.py
-    │   ├── explorer.py
-    │   ├── evaluator.py
-    │   └── decision.py
+    │   ├── types.py         # EvalResult, ExperimentRecord
+    │   ├── explorer.py      # Intelligent operator selection
+    │   ├── evaluator.py     # Metric parsing
+    │   └── decision.py      # Keep/revert decisions
     └── operators/        # Skill modification operators
         ├── clarify.py
         ├── add_examples.py
@@ -237,7 +305,8 @@ When you run `skillflow eval`, it generates `eval.yaml`:
 skills/my-skill/
 ├── SKILL.md           # Created by 'skillflow create'
 ├── eval.yaml          # Created by 'skillflow eval' (or 'skillflow eval --init')
-└── ...
+└── results/           # Evaluation results
+    └── results_YYYYMMDD_HHMMSS.tsv
 ```
 
 ## SKILL.md Format
@@ -271,6 +340,8 @@ defaults:
   timeout: 300
   threshold: 0.8
   grader_model: gpt-4o
+  # LLM-first evaluation with optional rule files (0.8/0.2 weight)
+  evaluation_mode: llm_primary
 
 tasks:
   - name: basic-task

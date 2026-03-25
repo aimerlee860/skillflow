@@ -27,8 +27,18 @@ class DecisionEngine:
             if state.experiment_history
             else datetime.datetime.now(),
             operator_type=operator_type,
+            # TASK metrics
             pass_rate=new_result.pass_rate,
             pass_at_k=new_result.pass_at_k,
+            pass_pow_k=new_result.pass_pow_k,
+            reward=new_result.reward,
+            # SKILL metrics
+            access_rate=new_result.access_rate,
+            deep_usage_rate=new_result.deep_usage_rate,
+            false_positive_rate=new_result.false_positive_rate,
+            effective_usage_rate=new_result.effective_usage_rate,
+            quality_score=new_result.quality_score,
+            # Combined
             combined_score=new_result.combined_score,
             changes_summary=changes_summary,
             skill_md_before=state.current_skill_md,

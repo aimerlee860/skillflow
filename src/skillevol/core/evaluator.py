@@ -76,40 +76,98 @@ class Evaluator:
         return stdout.decode()
 
     def _parse_output(self, output: str, duration: float) -> EvalResult:
+        """Parse evaluation output and extract all metrics."""
         try:
             data = json.loads(output)
+
+            # TASK-level metrics
             pass_rate = float(data.get("pass_rate", 0.0))
             pass_at_k = float(data.get("pass_at_k", 0.0))
+            pass_pow_k = float(data.get("pass_pow_k", 0.0))
+            reward = float(data.get("reward", 0.0))
+
+            # SKILL-level metrics
+            access_rate = float(data.get("access_rate", 1.0))
+            deep_usage_rate = float(data.get("deep_usage_rate", 0.0))
+            false_positive_rate = float(data.get("false_positive_rate", 0.0))
+            effective_usage_rate = float(data.get("effective_usage_rate", 0.0))
+            quality_score = float(data.get("quality_score", 0.0))
+
             trials = data.get("trials", self.config.trials)
             successes = sum(
                 1 for t in data.get("results", []) if t.get("reward", 0) >= self.config.threshold
             )
         except (json.JSONDecodeError, ValueError, KeyError):
-            pass_rate, pass_at_k, trials, successes = self._parse_text_output(output)
+            # Fallback to text parsing
+            metrics = self._parse_text_output(output)
+            pass_rate = metrics["pass_rate"]
+            pass_at_k = metrics["pass_at_k"]
+            pass_pow_k = metrics.get("pass_pow_k", 0.0)
+            reward = metrics.get("reward", 0.0)
+            access_rate = metrics.get("access_rate", 1.0)
+            deep_usage_rate = metrics.get("deep_usage_rate", 0.0)
+            false_positive_rate = metrics.get("false_positive_rate", 0.0)
+            effective_usage_rate = metrics.get("effective_usage_rate", 0.0)
+            quality_score = metrics.get("quality_score", 0.0)
+            trials = metrics.get("trials", self.config.trials)
+            successes = metrics.get("successes", 0)
 
-        combined_score = (pass_rate * (1 + pass_at_k)) / 2
-
-        return EvalResult(
+        result = EvalResult(
             pass_rate=pass_rate,
             pass_at_k=pass_at_k,
-            combined_score=combined_score,
+            pass_pow_k=pass_pow_k,
+            reward=reward,
+            access_rate=access_rate,
+            deep_usage_rate=deep_usage_rate,
+            false_positive_rate=false_positive_rate,
+            effective_usage_rate=effective_usage_rate,
+            quality_score=quality_score,
             num_trials=trials,
             num_successes=successes,
             duration_seconds=duration,
             raw_output=output,
         )
+        result.compute_combined_score()
+        return result
 
-    def _parse_text_output(self, output: str) -> tuple[float, float, int, int]:
+    def _parse_text_output(self, output: str) -> dict:
+        """Parse text output to extract metrics when JSON parsing fails."""
+        metrics = {}
+
+        # TASK metrics
         pass_rate_match = re.search(r"Pass rate:\s*([\d.]+)%", output)
+        metrics["pass_rate"] = float(pass_rate_match.group(1)) / 100 if pass_rate_match else 0.0
+
         pass_at_k_match = re.search(r"Pass @\d+:\s*([\d.]+)%", output)
+        metrics["pass_at_k"] = float(pass_at_k_match.group(1)) / 100 if pass_at_k_match else 0.0
 
-        pass_rate = float(pass_rate_match.group(1)) / 100 if pass_rate_match else 0.0
-        pass_at_k = float(pass_at_k_match.group(1)) / 100 if pass_at_k_match else 0.0
+        pass_pow_k_match = re.search(r"Pass POW @\d+:\s*([\d.]+)%", output)
+        metrics["pass_pow_k"] = float(pass_pow_k_match.group(1)) / 100 if pass_pow_k_match else 0.0
 
+        reward_match = re.search(r"Reward:\s*([\d.]+)", output)
+        metrics["reward"] = float(reward_match.group(1)) if reward_match else 0.0
+
+        # SKILL metrics (may not be present in all outputs)
+        access_rate_match = re.search(r"Access rate:\s*([\d.]+)%", output)
+        metrics["access_rate"] = float(access_rate_match.group(1)) / 100 if access_rate_match else 1.0
+
+        deep_usage_match = re.search(r"Deep usage:\s*([\d.]+)%", output)
+        metrics["deep_usage_rate"] = float(deep_usage_match.group(1)) / 100 if deep_usage_match else 0.0
+
+        fp_rate_match = re.search(r"False positive:\s*([\d.]+)%", output)
+        metrics["false_positive_rate"] = float(fp_rate_match.group(1)) / 100 if fp_rate_match else 0.0
+
+        effective_match = re.search(r"Effective usage:\s*([\d.]+)%", output)
+        metrics["effective_usage_rate"] = float(effective_match.group(1)) / 100 if effective_match else 0.0
+
+        quality_match = re.search(r"Quality score:\s*([\d.]+)", output)
+        metrics["quality_score"] = float(quality_match.group(1)) if quality_match else 0.0
+
+        # Trial counts
         trial_matches = re.findall(r"trial \d+", output)
-        trials = len(trial_matches) if trial_matches else self.config.trials
+        metrics["trials"] = len(trial_matches) if trial_matches else self.config.trials
 
         success_matches = re.findall(r"✓|PASS", output)
-        successes = len(success_matches)
+        metrics["successes"] = len(success_matches)
 
-        return pass_rate, pass_at_k, trials, successes
+        return metrics
