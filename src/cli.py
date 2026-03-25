@@ -286,8 +286,8 @@ Examples:
     )
     p_evolve.add_argument(
         "--model",
-        default="gpt-4o",
-        help="LLM model for evolution (default: gpt-4o)",
+        default=None,
+        help="LLM model for evolution (default: LLM_MODEL_NAME env var or gpt-4o)",
     )
     p_evolve.add_argument(
         "--keep-workspace",
