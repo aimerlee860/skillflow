@@ -226,6 +226,14 @@ Examples:
         "--model", "-m",
         help="Model name for eval.yaml generation (default: gpt-4o)",
     )
+    p_eval.add_argument(
+        "--rule-file", "-r",
+        dest="rule_files",
+        action="append",
+        type=Path,
+        help="Add a rule file for deterministic grading (can be used multiple times). "
+        "When rule files are provided, weights are: LLM rubric 0.8, rules 0.2 total.",
+    )
 
     # ========== evolve command ==========
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -475,11 +483,25 @@ def _generate_eval_yaml(skill_md: Path, eval_path: Path, args) -> None:
     name = name_match.group(1).strip() if name_match else skill_md.parent.name
     description = desc_match.group(1).strip() if desc_match else ""
 
+    # Read rule files if provided
+    rule_contents = []
+    if hasattr(args, 'rule_files') and args.rule_files:
+        for rule_path in args.rule_files:
+            if not rule_path.exists():
+                print(f"Warning: Rule file not found: {rule_path}", file=sys.stderr)
+                continue
+            rule_contents.append(rule_path.read_text(encoding="utf-8"))
+
     # Use EvalConfigGenerator to generate eval.yaml
     from skillgrade.core.eval_config import EvalConfigGenerator
 
     generator = EvalConfigGenerator()
-    generator.generate_to_file(name=name, description=description, output_path=eval_path)
+    generator.generate_to_file(
+        name=name,
+        description=description,
+        output_path=eval_path,
+        rule_files=rule_contents if rule_contents else None,
+    )
 
 
 def handle_evolve(args) -> int:

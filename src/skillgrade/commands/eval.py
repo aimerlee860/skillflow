@@ -16,6 +16,7 @@ async def run_eval(
     keep_workspaces: bool = False,
     quiet: bool = False,
     show_progress: bool = True,
+    metrics: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run evaluation on a skill.
 
@@ -33,6 +34,7 @@ async def run_eval(
         keep_workspaces: Whether to keep workspace copies for debugging
         quiet: Suppress output
         show_progress: Show progress bars
+        metrics: Optional list of metrics to focus on
 
     Returns:
         Tuple of (list of reports, output_dir)

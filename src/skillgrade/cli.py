@@ -95,6 +95,15 @@ Environment Variables:
         dest="constraints",
         help="Add a constraint (can be used multiple times)",
     )
+    p_init.add_argument(
+        "--rule-file",
+        "-r",
+        dest="rule_files",
+        action="append",
+        type=Path,
+        help="Add a rule file for deterministic grading (can be used multiple times). "
+        "Weights: LLM rubric 0.8, rules 0.2 total.",
+    )
 
     # create command (LLM-powered)
     p_create = subparsers.add_parser(
@@ -236,6 +245,8 @@ Examples:
     p_eval.add_argument(
         "skill_dir",
         type=Path,
+        nargs="?",
+        default=None,
         help="Path to the skill directory (must contain SKILL.md)",
     )
     p_eval.add_argument(
@@ -271,6 +282,20 @@ Examples:
         "-q",
         action="store_true",
         help="Suppress output",
+    )
+    p_eval.add_argument(
+        "--metric",
+        "-m",
+        type=str,
+        default=None,
+        dest="metrics",
+        help="Comma-separated metrics to focus on (e.g., 'pass_rate,access_rate'). "
+        "Run 'skillgrade metrics' to see all available metrics.",
+    )
+    p_eval.add_argument(
+        "--list-metrics",
+        action="store_true",
+        help="List all available metrics and exit",
     )
 
     # evolve command
@@ -387,6 +412,7 @@ def main() -> int:
 
     if args.command == "init":
         from skillforge import SkillCreator
+        from .core.eval_config import EvalConfigGenerator
 
         creator = SkillCreator()
         skill_path = creator.create(
@@ -397,9 +423,29 @@ def main() -> int:
             examples=args.examples or [],
             constraints=args.constraints or [],
         )
+
+        # Generate eval.yaml
+        rule_contents = None
+        if args.rule_files:
+            rule_contents = []
+            for rule_path in args.rule_files:
+                if rule_path.exists():
+                    rule_contents.append(rule_path.read_text())
+                else:
+                    print(f"Warning: Rule file not found: {rule_path}", file=sys.stderr)
+
+        eval_generator = EvalConfigGenerator()
+        eval_path = skill_path / "eval.yaml"
+        eval_generator.generate_to_file(
+            name=args.name,
+            description=args.description,
+            output_path=eval_path,
+            rule_files=rule_contents,
+        )
+
         print(f"Created skill at: {skill_path}")
         print(f"  - {skill_path / 'SKILL.md'}")
-        print(f"  - {skill_path / 'eval.yaml'}")
+        print(f"  - {eval_path}")
 
     elif args.command == "create":
         from skillforge import SkillCreatorAgent
@@ -486,6 +532,23 @@ def main() -> int:
 
     elif args.command == "eval":
         from .commands import run_eval
+        from .core.metrics import get_available_metrics_info, parse_metrics_list
+
+        # Handle --list-metrics
+        if args.list_metrics:
+            print(get_available_metrics_info())
+            return 0
+
+        # Validate skill_dir is provided for actual evaluation
+        if args.skill_dir is None:
+            print("Error: skill_dir is required for evaluation", file=sys.stderr)
+            print("Use --list-metrics to see available metrics", file=sys.stderr)
+            return 1
+
+        # Parse metrics if provided
+        metrics = None
+        if args.metrics:
+            metrics = parse_metrics_list(args.metrics)
 
         asyncio.run(
             run_eval(
@@ -496,6 +559,7 @@ def main() -> int:
                 keep_workspaces=args.keep_workspaces,
                 quiet=args.quiet,
                 show_progress=not args.quiet,
+                metrics=metrics,
             )
         )
 

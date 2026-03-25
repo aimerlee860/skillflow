@@ -15,7 +15,7 @@ class BaseAgent(ABC):
         instruction: str,
         workspace: str,
         timeout: int = 300,
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
         """Run the agent with the given instruction.
 
         Args:
@@ -24,6 +24,6 @@ class BaseAgent(ABC):
             timeout: Maximum execution time in seconds
 
         Returns:
-            Tuple of (final_output, tool_call_logs)
+            Tuple of (final_output, tool_call_logs, skill_tracking_logs)
         """
         ...

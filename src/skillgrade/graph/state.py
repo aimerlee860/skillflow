@@ -12,6 +12,7 @@ class SmokeState(TypedDict, total=False):
     - Task configuration
     - Execution results and logs
     - Trial iteration state
+    - Skill tracking data
     """
 
     task_name: str
@@ -28,6 +29,10 @@ class SmokeState(TypedDict, total=False):
     start_time: float
 
     error: str | None
+
+    # Skill tracking fields
+    skill_tracking_enabled: bool
+    skill_tracking_reports: list[dict[str, Any]]
 
 
 class TrialState(TypedDict, total=False):
@@ -46,3 +51,6 @@ class TrialState(TypedDict, total=False):
 
     duration_ms: float
     error: str | None
+
+    # Skill tracking data
+    skill_tracking: list[dict[str, Any]]

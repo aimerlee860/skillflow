@@ -14,8 +14,16 @@ tasks:
       {{ description }}
     workspace: []
     graders:
-      - type: llm_rubric
+{%- for grader in graders %}
+      - type: {{ grader.type }}
+        weight: {{ grader.weight }}
+{%- if grader.type == "llm_rubric" %}
         rubric: |
-          Evaluate whether the agent correctly completed the task.
-          Score 1.0 for complete success, 0.5 for partial success, 0.0 for failure.
-        weight: 1.0
+{% for line in grader.rubric.split('\n') %}          {{ line }}
+{% endfor %}
+{%- elif grader.type == "deterministic" %}
+        run: |
+{% for line in grader.run.split('\n') %}          {{ line }}
+{% endfor %}
+{%- endif %}
+{%- endfor %}

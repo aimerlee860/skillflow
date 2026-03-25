@@ -88,6 +88,8 @@ async def run_smoke_eval(
         "total_trials": trials,
         "start_time": time.time(),
         "error": None,
+        "skill_tracking_enabled": True,
+        "skill_tracking_reports": [],
     }
 
     # Collect all state updates from the graph
@@ -149,6 +151,7 @@ async def run_smoke_eval(
             ],
             duration_ms=result.get("duration_ms", 0.0),
             error=result.get("error"),
+            skill_tracking=result.get("skill_tracking", []),
         )
         trial_results.append(trial_result)
         total_duration += trial_result.duration_ms
@@ -199,8 +202,11 @@ async def run_quick_eval(
     )
 
     try:
-        agent = OAIAgent()
-        output, tool_logs = await agent.run(
+        agent = OAIAgent(
+            skill_paths=skill_paths,
+            enable_tracking=len(skill_paths or []) > 0,
+        )
+        output, tool_logs, skill_tracking_logs = await agent.run(
             instruction=instruction,
             workspace=str(workspace),
         )
@@ -230,11 +236,15 @@ async def run_quick_eval(
             sum(r.get("score", 0.0) * r.get("weight", 1.0) for r in grader_results) / total_weight
         )
 
+        # Extract skill tracking data
+        skill_tracking_data = [log["data"] for log in skill_tracking_logs]
+
         return {
             "output": output,
             "reward": reward,
             "graders": grader_results,
             "workspace": str(workspace),
+            "skill_tracking": skill_tracking_data,
         }
 
     finally:

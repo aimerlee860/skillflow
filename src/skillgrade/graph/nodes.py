@@ -48,16 +48,28 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
         state: Current graph state
 
     Returns:
-        Updated state with agent output
+        Updated state with agent output and skill tracking data
     """
-    agent = OAIAgent()
+    skill_paths = state.get("skill_paths", [])
+    skill_tracking_enabled = state.get("skill_tracking_enabled", True)
+
+    agent = OAIAgent(
+        skill_paths=skill_paths,
+        enable_tracking=skill_tracking_enabled and len(skill_paths) > 0,
+    )
     workspace = state.get("workspace", "")
 
     try:
-        output, tool_logs = await agent.run(
+        output, tool_logs, skill_tracking_logs = await agent.run(
             instruction=state["instruction"],
             workspace=workspace,
         )
+
+        # Get skill tracking reports from tracker
+        skill_reports = []
+        if agent.get_skill_tracker():
+            reports = agent.get_skill_tracker().generate_report()
+            skill_reports = [r.to_dict() for r in reports]
 
         return {
             "logs": [
@@ -74,7 +86,9 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
                     "data": log,
                 }
                 for log in tool_logs
-            ],
+            ]
+            + skill_tracking_logs,
+            "skill_tracking_reports": skill_reports,
         }
 
     except Exception as e:
@@ -96,11 +110,12 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
         state: Current graph state
 
     Returns:
-        Updated state with grader results
+        Updated state with grader results and skill tracking
     """
     workspace = Path(state.get("workspace", ""))
     grader_configs = state.get("grader_configs", [])
     logs = state.get("logs", [])
+    skill_tracking_reports = state.get("skill_tracking_reports", [])
 
     grader_results = []
 
@@ -140,6 +155,11 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
     total_weight = sum(r["weight"] for r in grader_results) if grader_results else 1.0
     reward = sum(r["score"] * r["weight"] for r in grader_results) / total_weight
 
+    # Extract skill tracking data from logs
+    skill_tracking_data = [
+        log["data"] for log in logs if log.get("type") == "skill_tracking"
+    ]
+
     return {
         "results": [
             {
@@ -147,6 +167,7 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
                 "reward": reward,
                 "graders": grader_results,
                 "duration_ms": 0,
+                "skill_tracking": skill_tracking_data,
             }
         ],
         "logs": [

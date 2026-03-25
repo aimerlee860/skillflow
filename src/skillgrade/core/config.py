@@ -201,11 +201,25 @@ def _looks_like_file_path(value: str) -> bool:
     return False
 
 
-def generate_template(skills: list[dict[str, Any]]) -> str:
-    """Generate an eval.yaml template."""
+def generate_template(
+    skills: list[dict[str, Any]],
+    rule_files: list[str] | None = None,
+) -> str:
+    """Generate an eval.yaml template.
+
+    Args:
+        skills: List of detected skills with name and description
+        rule_files: Optional list of rule file contents to add as deterministic graders
+
+    Returns:
+        Generated eval.yaml content
+    """
     skill_info = ""
     if skills:
         skill_info = f"Detected skill: {skills[0]['name']}\n"
+
+    # Build graders section
+    graders_section = _build_graders_section(rule_files)
 
     template = f"""# Skillgrade Evaluation Configuration
 # Generated template - customize for your skill
@@ -234,27 +248,103 @@ tasks:
       #   dest: test.js
 
     graders:
-      - type: deterministic
-        run: |
-          # Python grader must output JSON to stdout:
-          # {{"score": 0.0-1.0, "details": "...", "checks": [...]}}
-          import json
-          print(json.dumps({{
-              "score": 0.0,
-              "details": "TODO: implement grader",
-              "checks": []
-          }}))
-        weight: 0.7
-
-      - type: llm_rubric
-        rubric: |
-          # Evaluate the agent's approach:
-          # - Did the agent follow the correct workflow?
-          # - Did it use appropriate tools?
-          # - Was it efficient?
-        weight: 0.3
+{graders_section}
 """
     return template
+
+
+def _build_graders_section(rule_files: list[str] | None = None) -> str:
+    """Build the graders section for eval.yaml.
+
+    Args:
+        rule_files: Optional list of rule file contents
+
+    Returns:
+        Formatted graders YAML section
+    """
+    has_rules = rule_files and len(rule_files) > 0
+
+    # LLM rubric grader (always included)
+    llm_weight = 0.8 if has_rules else 1.0
+    llm_rubric = f"""      - type: llm_rubric
+        weight: {llm_weight}
+        rubric: |
+          # Evaluation Rubric
+          Evaluate the agent's performance on this task:
+
+          1. **Task Completion**: Did the agent achieve the stated goal?
+          2. **Correctness**: Is the solution correct and functional?
+          3. **Approach**: Did the agent use an appropriate methodology?
+          4. **Efficiency**: Was the solution efficient without unnecessary steps?
+          5. **Tool Usage**: Did the agent use tools effectively?
+
+          Score guidelines:
+          - 1.0: Perfect completion with good approach
+          - 0.7-0.9: Minor issues but overall successful
+          - 0.4-0.6: Partial completion or significant issues
+          - 0.0-0.3: Failed or wrong approach"""
+
+    if not has_rules:
+        return llm_rubric
+
+    # Add deterministic graders from rule files
+    lines = [llm_rubric]
+    for i, rule_content in enumerate(rule_files):
+        # Indent the rule content
+        indented_rule = "\n".join(
+            "          " + line for line in rule_content.split("\n")
+        )
+        lines.append(f"""
+      - type: deterministic
+        weight: {0.2 / len(rule_files):.2f}
+        run: |
+{indented_rule}""")
+
+    return "\n".join(lines)
+
+
+def normalize_grader_weights(graders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize grader weights based on grader types.
+
+    Rules:
+    - Only LLM rubric: weight = 1.0
+    - LLM rubric + deterministic: LLM = 0.8, deterministic = 0.2 (split among rules)
+
+    Args:
+        graders: List of grader configurations
+
+    Returns:
+        Graders with normalized weights
+    """
+    if not graders:
+        return graders
+
+    # Check if all graders already have explicit weights
+    has_explicit_weights = all(g.get("weight") is not None for g in graders)
+    if has_explicit_weights:
+        return graders
+
+    has_llm = any(g.get("type") == "llm_rubric" for g in graders)
+    has_det = any(g.get("type") == "deterministic" for g in graders)
+    det_count = sum(1 for g in graders if g.get("type") == "deterministic")
+
+    if has_llm and has_det:
+        # LLM + deterministic: 0.8 / 0.2
+        for g in graders:
+            if g.get("type") == "llm_rubric":
+                g["weight"] = 0.8
+            else:
+                g["weight"] = round(0.2 / det_count, 2)
+    elif has_llm:
+        # Only LLM: weight 1.0
+        for g in graders:
+            g["weight"] = 1.0 / len(graders)
+    elif has_det:
+        # Only deterministic: split evenly
+        for g in graders:
+            g["weight"] = 1.0 / det_count
+
+    return graders
 
 
 def save_report(report: EvalReport, output_dir: Path) -> Path:

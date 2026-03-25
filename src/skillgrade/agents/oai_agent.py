@@ -12,6 +12,8 @@ from langchain_core.messages import HumanMessage
 from .base import BaseAgent
 from ..llm.client import LLMClient
 from ..tools import shell, read_file, write_file, glob_files
+from ..tools.file_ops import set_skill_tracker, get_skill_tracker
+from ..core.skill_tracking import SkillTracker
 
 
 class OAIAgent(BaseAgent):
@@ -28,6 +30,8 @@ class OAIAgent(BaseAgent):
         api_key: str | None = None,
         max_iterations: int = 50,
         max_execution_time: int = 300,
+        skill_paths: list[str] | None = None,
+        enable_tracking: bool = True,
     ):
         """Initialize the OpenAI Functions Agent.
 
@@ -37,6 +41,8 @@ class OAIAgent(BaseAgent):
             api_key: Override API key
             max_iterations: Maximum number of agent iterations
             max_execution_time: Maximum execution time in seconds
+            skill_paths: Optional list of skill paths for tracking
+            enable_tracking: Whether to enable skill tracking
         """
         self.llm_client = LLMClient(
             base_url=base_url,
@@ -45,6 +51,11 @@ class OAIAgent(BaseAgent):
         )
         self.max_iterations = max_iterations
         self.max_execution_time = max_execution_time
+        self.skill_paths = skill_paths or []
+        self.enable_tracking = enable_tracking
+
+        # Skill tracker instance (created per run)
+        self._skill_tracker: SkillTracker | None = None
 
         self.tools = [shell, read_file, write_file, glob_files]
 
@@ -58,7 +69,7 @@ class OAIAgent(BaseAgent):
         instruction: str,
         workspace: str,
         timeout: int = 300,
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
         """Run the agent with the given instruction.
 
         Args:
@@ -67,9 +78,19 @@ class OAIAgent(BaseAgent):
             timeout: Maximum execution time in seconds
 
         Returns:
-            Tuple of (final_output, tool_call_logs)
+            Tuple of (final_output, tool_call_logs, skill_tracking_logs)
         """
         original_cwd = Path.cwd()
+
+        # Initialize skill tracker for this run
+        if self.enable_tracking and self.skill_paths:
+            self._skill_tracker = SkillTracker(
+                skill_paths=self.skill_paths,
+                workspace=Path(workspace),
+            )
+            # Set global tracker for tools to access
+            set_skill_tracker(self._skill_tracker)
+
         try:
             os.chdir(workspace)
 
@@ -89,6 +110,7 @@ class OAIAgent(BaseAgent):
             messages = result.get("messages", [])
             output = ""
             logs = []
+            skill_tracking_logs = []
 
             for msg in messages:
                 if hasattr(msg, "type"):
@@ -106,11 +128,27 @@ class OAIAgent(BaseAgent):
                             }
                         )
 
-            return output or "No output generated", logs
+            # Generate skill tracking logs
+            if self._skill_tracker:
+                skill_tracking_logs = [
+                    {
+                        "type": "skill_tracking",
+                        "data": session.to_dict(),
+                    }
+                    for session in self._skill_tracker.get_all_sessions()
+                ]
+
+            return output or "No output generated", logs, skill_tracking_logs
 
         finally:
             os.chdir(original_cwd)
+            # Clear global tracker after run
+            set_skill_tracker(None)
 
     def get_model_name(self) -> str:
         """Get the model name being used."""
         return self.llm_client.get_model_name()
+
+    def get_skill_tracker(self) -> SkillTracker | None:
+        """Get the skill tracker instance from the last run."""
+        return self._skill_tracker

@@ -73,6 +73,24 @@ class LogType(str, Enum):
     TOOL_CALL = "tool_call"
     SETUP = "setup"
     CLEANUP = "cleanup"
+    SKILL_TRACKING = "skill_tracking"
+
+
+class SkillAccessType(str, Enum):
+    """Types of skill file access."""
+
+    SKILL_MD = "skill_md"
+    REFERENCE = "reference"
+    SCRIPT = "script"
+    ASSET = "asset"
+
+
+class SkillActivationStatus(str, Enum):
+    """Skill activation status during agent execution."""
+
+    INJECTED = "injected"
+    ACCESSED = "accessed"
+    DEEP_USAGE = "deep_usage"
 
 
 @dataclass
@@ -93,6 +111,93 @@ class LogEntry:
 
 
 @dataclass
+class SkillAccessRecord:
+    """Record of a single skill file access."""
+
+    skill_name: str
+    access_type: SkillAccessType
+    file_path: str
+    timestamp: float
+    tool_used: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "skillName": self.skill_name,
+            "accessType": self.access_type.value,
+            "filePath": self.file_path,
+            "timestamp": self.timestamp,
+            "toolUsed": self.tool_used,
+        }
+
+
+@dataclass
+class SkillTrackingSession:
+    """Complete skill tracking data for a single trial."""
+
+    trial_index: int
+    skill_name: str
+    skill_path: str
+    activation_status: SkillActivationStatus
+    injected_in_prompt: bool
+    access_records: list[SkillAccessRecord] = field(default_factory=list)
+    access_depth: int = 0
+    first_access_time: float | None = None
+    last_access_time: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "trialIndex": self.trial_index,
+            "skillName": self.skill_name,
+            "skillPath": self.skill_path,
+            "activationStatus": self.activation_status.value,
+            "injectedInPrompt": self.injected_in_prompt,
+            "accessRecords": [r.to_dict() for r in self.access_records],
+            "accessDepth": self.access_depth,
+            "firstAccessTime": self.first_access_time,
+            "lastAccessTime": self.last_access_time,
+        }
+
+
+@dataclass
+class SkillTrackingReport:
+    """Aggregated skill tracking statistics across all trials."""
+
+    skill_name: str
+    total_trials: int
+    injected_count: int
+    accessed_count: int
+    deep_usage_count: int
+    access_rate: float
+    deep_usage_rate: float
+    false_positive_rate: float
+    effective_usage_rate: float
+    skill_md_reads: int
+    reference_reads: int
+    script_accesses: int
+    asset_accesses: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "skillName": self.skill_name,
+            "totalTrials": self.total_trials,
+            "injectedCount": self.injected_count,
+            "accessedCount": self.accessed_count,
+            "deepUsageCount": self.deep_usage_count,
+            "accessRate": self.access_rate,
+            "deepUsageRate": self.deep_usage_rate,
+            "falsePositiveRate": self.false_positive_rate,
+            "effectiveUsageRate": self.effective_usage_rate,
+            "skillMdReads": self.skill_md_reads,
+            "referenceReads": self.reference_reads,
+            "scriptAccesses": self.script_accesses,
+            "assetAccesses": self.asset_accesses,
+        }
+
+
+@dataclass
 class TrialResult:
     """Result of a single trial."""
 
@@ -103,18 +208,27 @@ class TrialResult:
     logs: list[LogEntry]
     duration_ms: float
     error: str | None = None
+    skill_tracking: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary with camelCase keys."""
-        return {
-            "taskName": self.task_name,
+    def to_dict(self, include_logs: bool = False) -> dict[str, Any]:
+        """Convert to dictionary with camelCase keys.
+
+        Args:
+            include_logs: Whether to include detailed logs (default: False for compact output)
+        """
+        result: dict[str, Any] = {
             "trialIndex": self.trial_index,
             "reward": self.reward,
             "graders": [g.to_dict() for g in self.graders],
-            "logs": [l.to_dict() for l in self.logs],
             "durationMs": self.duration_ms,
-            "error": self.error,
         }
+        if include_logs:
+            result["logs"] = [l.to_dict() for l in self.logs]
+        if self.error:
+            result["error"] = self.error
+        if self.skill_tracking:
+            result["skillTracking"] = self.skill_tracking
+        return result
 
 
 @dataclass
@@ -128,18 +242,26 @@ class EvalReport:
     trials: list[TrialResult]
     avg_duration_ms: float
     timestamp: str
+    skill_statistics: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary with camelCase keys."""
-        return {
+    def to_dict(self, include_logs: bool = False) -> dict[str, Any]:
+        """Convert to dictionary with camelCase keys.
+
+        Args:
+            include_logs: Whether to include detailed logs in trials (default: False)
+        """
+        result = {
             "taskName": self.task_name,
             "passRate": self.pass_rate,
             "passAtK": self.pass_at_k,
             "passPowK": self.pass_pow_k,
-            "trials": [t.to_dict() for t in self.trials],
+            "trials": [t.to_dict(include_logs=include_logs) for t in self.trials],
             "avgDurationMs": self.avg_duration_ms,
             "timestamp": self.timestamp,
         }
+        if self.skill_statistics:
+            result["skillStatistics"] = self.skill_statistics
+        return result
 
 
 @dataclass
@@ -237,3 +359,6 @@ class SmokeState(TypedDict, total=False):
     total_trials: int
     start_time: float
     error: str | None
+    skill_paths: list[str]
+    skill_tracking_enabled: bool
+    skill_tracking_reports: list[dict[str, Any]]

@@ -28,7 +28,6 @@ async def run_evolve(
     patience: int = 20,
     strategy: str = "hybrid",
     program_md: Optional[Path] = None,
-    llm_provider: str = "openai",
     llm_model: str = "gpt-4o",
     keep_workspace: bool = False,
     verbose: bool = False,
@@ -44,7 +43,6 @@ async def run_evolve(
         patience: Stop after N consecutive no-improvements
         strategy: Evolution strategy (hybrid, autonomous, structured)
         program_md: Optional path to program.md
-        llm_provider: LLM provider (openai, anthropic)
         llm_model: LLM model name
         keep_workspace: Keep workspaces after completion
         verbose: Verbose output
@@ -75,7 +73,7 @@ async def run_evolve(
     console.print(f"  Trials: {trials}")
     console.print()
 
-    llm_client = LLMClient(provider=llm_provider, model=llm_model)
+    llm_client = LLMClient(model=llm_model)
     eval_config_obj = EvalConfig(
         skill_path=skill_path,
         eval_config_path=eval_config_path if eval_config_path and eval_config_path.exists() else None,

@@ -9,6 +9,8 @@ from typing import Any
 from tqdm import tqdm
 
 from ..core.config import load_eval_config_from_path, save_report
+from ..core.skill_tracking import aggregate_reports
+from ..core.skill_stats import calculate_skill_statistics
 from ..graph import run_smoke_eval
 from ..types import EvalConfig, EvalReport
 
@@ -73,6 +75,13 @@ async def run_smoke(
                 skill_paths=skill_paths,
             )
 
+        # Calculate skill statistics from trial results
+        trial_results = [t.to_dict() for t in report.trials]
+        tracking_reports = aggregate_reports(trial_results)
+        if tracking_reports:
+            skill_stats = calculate_skill_statistics(tracking_reports, trial_results)
+            report.skill_statistics = [s.to_dict() for s in skill_stats]
+
         report_path = save_report(report, output_dir)
         all_reports.append(report.to_dict())
 
@@ -97,3 +106,15 @@ def _print_summary(report: EvalReport) -> None:
 
         for grader in trial.graders:
             print(f"    - {grader.grader_type}: {grader.score:.2%} ({grader.details})")
+
+    # Print skill statistics
+    if report.skill_statistics:
+        print(f"\n{'─' * 40}")
+        print("Skill Statistics:")
+        for stat in report.skill_statistics:
+            print(f"  {stat['skillName']}:")
+            print(f"    Quality Score:     {stat['qualityScore']:.2f}")
+            print(f"    Trigger Accuracy:  {stat['triggerAccuracy']:.2%}")
+            print(f"    False Positive:    {stat['falsePositiveRate']:.2%}")
+            if stat.get('taskCompletionScore'):
+                print(f"    Task Completion:   {stat['taskCompletionScore']:.2%}")

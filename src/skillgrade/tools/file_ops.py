@@ -3,9 +3,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+
+# Global skill tracker instance (set by OAIAgent)
+_skill_tracker: Any = None
+
+
+def set_skill_tracker(tracker: Any) -> None:
+    """Set the global skill tracker instance."""
+    global _skill_tracker
+    _skill_tracker = tracker
+
+
+def get_skill_tracker() -> Any:
+    """Get the global skill tracker instance."""
+    return _skill_tracker
 
 
 class ReadFileInput(BaseModel):
@@ -37,6 +52,14 @@ async def read_file(file_path: str) -> str:
         path = Path(file_path)
         if not path.exists():
             return f"Error: File not found: {file_path}"
+
+        # Track skill access before reading
+        if _skill_tracker is not None:
+            _skill_tracker.record_access(
+                file_path=str(path.resolve()),
+                tool_used="read_file",
+            )
+
         return path.read_text()
     except PermissionError:
         return f"Error: Permission denied: {file_path}"
@@ -68,4 +91,4 @@ async def write_file(file_path: str, content: str) -> str:
         return f"Error writing file: {str(e)}"
 
 
-__all__ = ["read_file", "write_file"]
+__all__ = ["read_file", "write_file", "set_skill_tracker", "get_skill_tracker"]
