@@ -186,14 +186,32 @@ Remember:
                 if done_marker.exists():
                     break
 
+        timeout_occurred = False
         try:
             await asyncio.wait_for(run_with_early_exit(), timeout=180)
         except asyncio.TimeoutError:
-            pass
+            timeout_occurred = True
+            print(f"Warning: Skill creation timed out after 180 seconds")
+        except Exception as e:
+            print(f"Error during skill creation: {e}")
         finally:
             # Clean up the marker file
             if done_marker.exists():
                 done_marker.unlink()
+
+        # Verify the skill was actually created
+        skill_md_path = skill_path / "SKILL.md"
+        if not skill_md_path.exists():
+            if timeout_occurred:
+                raise RuntimeError(
+                    f"Skill creation timed out and {skill_path / 'SKILL.md'} was not created. "
+                    "The LLM agent may need more time or there might be an API issue."
+                )
+            else:
+                raise RuntimeError(
+                    f"Skill creation failed: {skill_md_path} was not created. "
+                    "Please check your LLM API configuration (LLM_BASE_URL, LLM_API_KEY)."
+                )
 
         return skill_path
 
