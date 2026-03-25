@@ -220,35 +220,62 @@ class SkillTracker:
 
 
 def aggregate_reports(
-    session_reports: list[list[SkillTrackingReport]],
+    trial_results: list[dict],
 ) -> list[SkillTrackingReport]:
-    """Aggregate multiple trial reports into a single report per skill.
+    """Aggregate skill tracking data from multiple trial result dicts.
 
     Args:
-        session_reports: List of report lists from multiple trials
+        trial_results: List of trial result dicts (from TrialResult.to_dict())
+                       Each dict contains a "skillTracking" key with list of session dicts
 
     Returns:
         List of aggregated SkillTrackingReport
     """
-    # Group by skill name
-    skill_data: dict[str, list[SkillTrackingReport]] = {}
-    for trial_reports in session_reports:
-        for report in trial_reports:
-            if report.skill_name not in skill_data:
-                skill_data[report.skill_name] = []
-            skill_data[report.skill_name].append(report)
+    # Collect all skill tracking sessions across all trials
+    all_sessions: list[dict] = []
+
+    for trial in trial_results:
+        # Each trial dict has "skillTracking" key with list of session dicts
+        tracking_sessions = trial.get("skillTracking", [])
+        all_sessions.extend(tracking_sessions)
+
+    if not all_sessions:
+        return []
+
+    # Group by skill name (using camelCase key from to_dict())
+    skill_data: dict[str, list[dict]] = {}
+    for session in all_sessions:
+        skill_name = session.get("skillName")
+        if skill_name is None:
+            continue
+        if skill_name not in skill_data:
+            skill_data[skill_name] = []
+        skill_data[skill_name].append(session)
 
     aggregated = []
-    for skill_name, reports in skill_data.items():
-        total_trials = len(reports)
-        injected_count = sum(r.injected_count for r in reports)
-        accessed_count = sum(r.accessed_count for r in reports)
-        deep_usage_count = sum(r.deep_usage_count for r in reports)
+    for skill_name, sessions in skill_data.items():
+        total_trials = len(sessions)
+        injected_count = sum(1 for s in sessions if s.get("injectedInPrompt", False))
+        accessed_count = sum(1 for s in sessions if s.get("activationStatus") in ("accessed", "deep_usage"))
+        deep_usage_count = sum(1 for s in sessions if s.get("activationStatus") == "deep_usage")
 
-        skill_md_reads = sum(r.skill_md_reads for r in reports)
-        reference_reads = sum(r.reference_reads for r in reports)
-        script_accesses = sum(r.script_accesses for r in reports)
-        asset_accesses = sum(r.asset_accesses for r in reports)
+        # Sum up access records by type
+        skill_md_reads = 0
+        reference_reads = 0
+        script_accesses = 0
+        asset_accesses = 0
+
+        for session in sessions:
+            for record in session.get("accessRecords", []):
+                access_type = record.get("accessType")
+                if access_type == "skill_md":
+                    skill_md_reads += 1
+                elif access_type == "reference":
+                    reference_reads += 1
+                elif access_type == "script":
+                    script_accesses += 1
+                elif access_type == "asset":
+                    asset_accesses += 1
 
         # Calculate aggregated rates
         access_rate = accessed_count / injected_count if injected_count > 0 else 0.0

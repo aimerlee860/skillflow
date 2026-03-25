@@ -17,6 +17,7 @@ async def run_eval(
     quiet: bool = False,
     show_progress: bool = True,
     metrics: list[str] | None = None,
+    json_output: bool = False,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run evaluation on a skill.
 
@@ -35,13 +36,15 @@ async def run_eval(
         quiet: Suppress output
         show_progress: Show progress bars
         metrics: Optional list of metrics to focus on
+        json_output: Output results as JSON to stdout
 
     Returns:
         Tuple of (list of reports, output_dir)
     """
+    import json
     from ..core import EvalRunner
 
-    if not quiet:
+    if not quiet and not json_output:
         print(f"Evaluating skill: {skill_dir}")
 
     runner = EvalRunner(
@@ -54,7 +57,7 @@ async def run_eval(
     try:
         temp_dir, eval_config_path = await runner.setup()
 
-        if not quiet:
+        if not quiet and not json_output:
             print(f"Working directory: {temp_dir}")
             print(f"Config: {eval_config_path}")
             print(f"Results: {runner.results_dir}")
@@ -69,11 +72,50 @@ async def run_eval(
             skill_paths=skill_paths,
             trials=trials,
             output_dir=runner.results_dir,
-            quiet=quiet,
-            show_progress=show_progress,
+            quiet=quiet or json_output,
+            show_progress=show_progress and not json_output,
         )
 
-        if not quiet:
+        if json_output:
+            # Output aggregated results as JSON to stdout
+            if reports:
+                # Aggregate metrics across all tasks
+                total_trials = sum(r.get("trials", 0) for r in reports)
+                total_passes = sum(
+                    sum(1 for t in r.get("trials", []) if t.get("reward", 0) >= 0.5)
+                    for r in reports
+                )
+                pass_rate = total_passes / total_trials if total_trials > 0 else 0.0
+
+                # Calculate pass@k
+                import math
+                pass_at_k = 1 - math.prod(1 - t.get("reward", 0) for t in reports[0].get("trials", [])) if reports else 0.0
+
+                # Get skill statistics if available
+                skill_stats = reports[0].get("skillStatistics", [{}]) if reports else [{}]
+
+                output = {
+                    "pass_rate": pass_rate,
+                    "pass_at_k": pass_at_k,
+                    "pass_pow_k": pass_rate,  # Simplified
+                    "reward": sum(r.get("avgReward", r.get("avg_reward", 0)) for r in reports) / len(reports) if reports else 0.0,
+                    "trials": total_trials,
+                    "results": reports,
+                }
+
+                # Add skill metrics if available
+                if skill_stats:
+                    stat = skill_stats[0] if skill_stats else {}
+                    output["access_rate"] = stat.get("triggerAccuracy", 1.0)
+                    output["deep_usage_rate"] = stat.get("deepUsageRate", 0.0)
+                    output["false_positive_rate"] = stat.get("falsePositiveRate", 0.0)
+                    output["effective_usage_rate"] = stat.get("effectiveUsageRate", 0.0)
+                    output["quality_score"] = stat.get("qualityScore", 0.0)
+
+                print(json.dumps(output))
+            else:
+                print(json.dumps({"error": "No results", "pass_rate": 0.0}))
+        elif not quiet:
             print(f"\n{'=' * 60}")
             print("Evaluation complete!")
             print(f"Results saved to: {results_dir}")

@@ -297,6 +297,11 @@ Examples:
         action="store_true",
         help="List all available metrics and exit",
     )
+    p_eval.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON to stdout (for machine consumption)",
+    )
 
     # evolve command
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -560,6 +565,7 @@ def main() -> int:
                 quiet=args.quiet,
                 show_progress=not args.quiet,
                 metrics=metrics,
+                json_output=getattr(args, 'json', False),
             )
         )
 

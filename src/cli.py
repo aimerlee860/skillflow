@@ -234,6 +234,11 @@ Examples:
         help="Add a rule file for deterministic grading (can be used multiple times). "
         "When rule files are provided, weights are: LLM rubric 0.8, rules 0.2 total.",
     )
+    p_eval.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON to stdout (for machine consumption)",
+    )
 
     # ========== evolve command ==========
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -464,6 +469,7 @@ def handle_eval(args) -> int:
             keep_workspaces=args.keep_workspaces,
             quiet=args.quiet,
             show_progress=not args.quiet,
+            json_output=getattr(args, 'json', False),
         )
     )
     return 0

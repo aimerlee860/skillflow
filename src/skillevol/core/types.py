@@ -138,7 +138,7 @@ class EvalConfig:
     trials: int = 5
     timeout_seconds: int = 300
     threshold: float = 0.5
-    skillgrade_cmd: str = "skillgrade"
+    skillgrade_cmd: str = "skillflow"  # Use unified skillflow CLI
 
 
 @dataclass
