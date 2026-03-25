@@ -14,10 +14,39 @@ _project_root = Path(__file__).resolve().parent.parent.parent.parent
 _env_path = _project_root / ".env"
 load_dotenv(_env_path)
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
+
+
+def _get_proxy_client() -> tuple[httpx.Client | None, httpx.AsyncClient | None]:
+    """Create httpx clients with proxy settings from environment variables.
+
+    Reads: http_proxy, https_proxy, no_proxy
+
+    Returns:
+        Tuple of (sync_client, async_client) or (None, None) if no proxy configured
+    """
+    http_proxy = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
+    https_proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+    no_proxy = os.environ.get("no_proxy") or os.environ.get("NO_PROXY")
+
+    if not (http_proxy or https_proxy):
+        return None, None
+
+    # Build proxy mapping
+    proxies = {}
+    if http_proxy:
+        proxies["http://"] = http_proxy
+    if https_proxy:
+        proxies["https://"] = https_proxy
+
+    sync_client = httpx.Client(proxies=proxies, timeout=120.0)
+    async_client = httpx.AsyncClient(proxies=proxies, timeout=120.0)
+
+    return sync_client, async_client
 
 
 class LLMClient:
@@ -42,13 +71,17 @@ class LLMClient:
 
     @property
     def chat(self) -> ChatOpenAI:
-        """Get a ChatOpenAI instance."""
+        """Get a ChatOpenAI instance with proxy support."""
+        sync_client, async_client = _get_proxy_client()
+
         return ChatOpenAI(
             model=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
             max_retries=3,
+            http_client=sync_client,
+            http_async_client=async_client,
         )
 
     async def achat(
