@@ -29,11 +29,13 @@ class MetricType(str, Enum):
     # Skill tracking metrics
     ACCESS_RATE = "access_rate"
     DEEP_USAGE_RATE = "deep_usage_rate"
-    FALSE_POSITIVE_RATE = "false_positive_rate"
     EFFECTIVE_USAGE_RATE = "effective_usage_rate"
     QUALITY_SCORE = "quality_score"
     TASK_COMPLETION_SCORE = "task_completion_score"
     EFFICIENCY_SCORE = "efficiency_score"
+    TRIGGER_ACCURACY = "trigger_accuracy"  # 触发准确率
+    FALSE_POSITIVE_RATE = "false_positive_rate"  # 误触发率
+    PASS_K = "pass_k"  # K次尝试全部通过
 
 
 @dataclass
@@ -173,6 +175,26 @@ METRIC_DEFINITIONS: dict[MetricType, MetricDefinition] = {
         higher_is_better=True,
         unit="",
         format_pattern=".2f",
+    ),
+    MetricType.TRIGGER_ACCURACY: MetricDefinition(
+        name="trigger_accuracy",
+        display_name="Trigger Accuracy",
+        category=MetricCategory.TASK,
+        description="Ratio of correctly triggered skills to total trigger opportunities",
+        value_range=(0.0, 1.0),
+        higher_is_better=True,
+        unit="%",
+        format_pattern=".2%",
+    ),
+    MetricType.PASS_K: MetricDefinition(
+        name="pass_k",
+        display_name="Pass^K",
+        category=MetricCategory.TASK,
+        description="Probability that all K trials pass",
+        value_range=(0.0, 1.0),
+        higher_is_better=True,
+        unit="",
+        format_pattern=".4f",
     ),
 }
 
@@ -337,3 +359,74 @@ def parse_metrics_list(metrics_str: str) -> list[str]:
                 raise ValueError(f"Invalid metric '{part}': {e}")
 
     return metrics
+
+
+def calculate_pass_at_k(pass_rate: float, k: int) -> float:
+    """Calculate pass@k: probability of at least one success in k trials.
+
+    Args:
+        pass_rate: Single trial pass rate
+        k: Number of trials
+
+    Returns:
+        Probability of at least one success
+    """
+    if k <= 0:
+        raise ValueError("k must be positive")
+    if pass_rate < 0 or pass_rate > 1:
+        raise ValueError("pass_rate must be between 0 and 1")
+    return 1 - (1 - pass_rate) ** k
+
+
+def calculate_pass_k(pass_rate: float, k: int) -> float:
+    """Calculate pass^K: probability of all k trials passing.
+
+    Args:
+        pass_rate: Single trial pass rate
+        k: Number of trials
+
+    Returns:
+        Probability of all trials passing
+    """
+    if k <= 0:
+        raise ValueError("k must be positive")
+    if pass_rate < 0 or pass_rate > 1:
+        raise ValueError("pass_rate must be between 0 and 1")
+    return pass_rate ** k
+
+
+def calculate_trigger_accuracy(
+    correct_triggers: int,
+    total_trigger_opportunities: int,
+) -> float:
+    """Calculate trigger accuracy.
+
+    Args:
+        correct_triggers: Number of times skill was correctly triggered
+        total_trigger_opportunities: Total times skill should have been triggered
+
+    Returns:
+        Trigger accuracy ratio (0.0 to 1.0)
+    """
+    if total_trigger_opportunities == 0:
+        return 1.0  # No opportunities = perfect accuracy
+    return correct_triggers / total_trigger_opportunities
+
+
+def calculate_false_positive_rate(
+    false_triggers: int,
+    total_non_trigger_cases: int,
+) -> float:
+    """Calculate false positive rate (误触发率).
+
+    Args:
+        false_triggers: Number of times skill was incorrectly triggered
+        total_non_trigger_cases: Total cases where skill should NOT be triggered
+
+    Returns:
+        False positive rate (0.0 to 1.0)
+    """
+    if total_non_trigger_cases == 0:
+        return 0.0  # No non-trigger cases = no false positives possible
+    return false_triggers / total_non_trigger_cases
+

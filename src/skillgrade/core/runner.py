@@ -13,8 +13,8 @@ from .config import (
     load_eval_config,
     load_eval_config_from_path,
     save_eval_config,
-    generate_template,
 )
+from .generator import generate_eval_plan
 from .skills import detect_skills
 from .workspace import create_temp_workspace, cleanup_workspace
 
@@ -94,9 +94,9 @@ class EvalRunner:
                 config.skill = self.skill_dir.name
             save_eval_config(config, self._eval_config_path)
         else:
-            skills = detect_skills(self.skill_dir)
-            config_content = generate_template(skills)
-            self._eval_config_path.write_text(config_content)
+            # Generate evaluation configuration using deep analysis
+            config = generate_eval_plan(self.skill_dir)
+            save_eval_config(config, self._eval_config_path)
 
         return self._temp_dir, self._eval_config_path
 

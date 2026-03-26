@@ -14,6 +14,107 @@ class GraderType(str, Enum):
     LLM_RUBRIC = "llm_rubric"
 
 
+# =============================================================================
+# Skill Analysis Types
+# =============================================================================
+
+
+@dataclass
+class SkillMetadata:
+    """技能元数据（从 SKILL.md frontmatter 提取）"""
+
+    name: str
+    description: str
+    compatibility: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SkillSection:
+    """技能章节（从 SKILL.md body 提取）"""
+
+    title: str
+    content: str
+    level: int = 2  # 标题级别 (## = 2, ### = 3)
+
+
+@dataclass
+class SkillResource:
+    """技能关联资源"""
+
+    path: str
+    type: str  # reference, script, asset
+    content: str
+
+
+@dataclass
+class SkillExample:
+    """技能示例"""
+
+    name: str
+    input: str
+    expected_output: str | None = None
+
+
+@dataclass
+class WorkflowStep:
+    """工作流程步骤"""
+
+    name: str
+    description: str
+    order: int
+
+
+@dataclass
+class SkillAnalysis:
+    """技能分析结果"""
+
+    metadata: SkillMetadata
+    sections: list[SkillSection] = field(default_factory=list)
+    resources: list[SkillResource] = field(default_factory=list)
+
+    # 提取的关键信息
+    use_cases: list[str] = field(default_factory=list)  # 何时使用
+    core_functions: list[str] = field(default_factory=list)  # 核心功能
+    workflows: list[WorkflowStep] = field(default_factory=list)  # 工作流程
+    validation_rules: list[str] = field(default_factory=list)  # 验证规则
+    examples: list[SkillExample] = field(default_factory=list)  # 示例
+    error_conditions: list[str] = field(default_factory=list)  # 错误处理条件
+    security_notes: list[str] = field(default_factory=list)  # 安全注意事项
+    output_formats: list[str] = field(default_factory=list)  # 输出格式
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "metadata": {
+                "name": self.metadata.name,
+                "description": self.metadata.description,
+                "compatibility": self.metadata.compatibility,
+            },
+            "sections": [
+                {"title": s.title, "content": s.content, "level": s.level}
+                for s in self.sections
+            ],
+            "resources": [
+                {"path": r.path, "type": r.type, "content": r.content}
+                for r in self.resources
+            ],
+            "useCases": self.use_cases,
+            "coreFunctions": self.core_functions,
+            "workflows": [
+                {"name": w.name, "description": w.description, "order": w.order}
+                for w in self.workflows
+            ],
+            "validationRules": self.validation_rules,
+            "examples": [
+                {"name": e.name, "input": e.input, "expectedOutput": e.expected_output}
+                for e in self.examples
+            ],
+            "errorConditions": self.error_conditions,
+            "securityNotes": self.security_notes,
+            "outputFormats": self.output_formats,
+        }
+
+
 @dataclass
 class CommandResult:
     """Result of a shell command execution."""

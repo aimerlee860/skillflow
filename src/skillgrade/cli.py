@@ -302,6 +302,7 @@ Examples:
         action="store_true",
         help="Output results as JSON to stdout (for machine consumption)",
     )
+    # deep-analysis removed - always use deep analysis now
 
     # evolve command
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")

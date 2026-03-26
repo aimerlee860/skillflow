@@ -239,6 +239,11 @@ Examples:
         action="store_true",
         help="Output results as JSON to stdout (for machine consumption)",
     )
+    p_eval.add_argument(
+        "--static",
+        action="store_true",
+        help="Run static analysis only (check SKILL.md completeness without running Agent)",
+    )
 
     # ========== evolve command ==========
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -435,6 +440,10 @@ def handle_eval(args) -> int:
         print(f"Error: SKILL.md not found in {skill_dir}", file=sys.stderr)
         return 1
 
+    # Handle --static (static analysis only)
+    if getattr(args, 'static', False):
+        return _run_static_analysis(skill_dir, json_output=getattr(args, 'json', False))
+
     # Determine eval.yaml path
     if args.init and args.target_path:
         eval_path = args.target_path
@@ -475,39 +484,41 @@ def handle_eval(args) -> int:
     return 0
 
 
+def _run_static_analysis(skill_dir: Path, json_output: bool = False) -> int:
+    """Run static analysis on a skill directory.
+
+    Args:
+        skill_dir: Path to the skill directory
+        json_output: Whether to output as JSON
+
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    from skillgrade.core.static_analyzer import run_static_analysis, format_static_report
+    import json
+
+    report = run_static_analysis(skill_dir)
+
+    if json_output:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(format_static_report(report))
+
+    # Return non-zero if there are errors
+    return 0 if len(report.errors) == 0 else 1
+
+
 def _generate_eval_yaml(skill_md: Path, eval_path: Path, args) -> None:
-    """Generate eval.yaml using LLM."""
-    import re
+    """Generate eval.yaml from skill analysis."""
+    from skillgrade.core.config import save_eval_config
+    from skillgrade.core.generator import generate_eval_plan
 
-    # Read skill content
-    skill_content = skill_md.read_text()
+    skill_dir = skill_md.parent
 
-    # Extract name and description from frontmatter
-    name_match = re.search(r"^name:\s*(.+)$", skill_content, re.MULTILINE)
-    desc_match = re.search(r"^description:\s*(.+)$", skill_content, re.MULTILINE)
-
-    name = name_match.group(1).strip() if name_match else skill_md.parent.name
-    description = desc_match.group(1).strip() if desc_match else ""
-
-    # Read rule files if provided
-    rule_contents = []
-    if hasattr(args, 'rule_files') and args.rule_files:
-        for rule_path in args.rule_files:
-            if not rule_path.exists():
-                print(f"Warning: Rule file not found: {rule_path}", file=sys.stderr)
-                continue
-            rule_contents.append(rule_path.read_text(encoding="utf-8"))
-
-    # Use EvalConfigGenerator to generate eval.yaml
-    from skillgrade.core.eval_config import EvalConfigGenerator
-
-    generator = EvalConfigGenerator()
-    generator.generate_to_file(
-        name=name,
-        description=description,
-        output_path=eval_path,
-        rule_files=rule_contents if rule_contents else None,
-    )
+    print(f"Analyzing skill at {skill_dir}...")
+    config = generate_eval_plan(skill_dir)
+    save_eval_config(config, eval_path)
+    print(f"  Generated {len(config.tasks)} test tasks based on skill analysis")
 
 
 def handle_evolve(args) -> int:

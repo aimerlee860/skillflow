@@ -93,28 +93,32 @@ async def run_smoke(
 
 def _print_summary(report: EvalReport) -> None:
     """Print a summary of the evaluation report."""
-    print(f"\nTask: {report.task_name}")
-    print(f"Pass Rate: {report.pass_rate:.2%}")
-    print(f"Pass@K:   {report.pass_at_k:.4f}")
-    print(f"Pass^K:   {report.pass_pow_k:.4f}")
-    print(f"Trials:   {len(report.trials)}")
-    print(f"Avg Time: {report.avg_duration_ms / 1000:.1f}s")
+    print(f"\n任务: {report.task_name}")
+    print(f"通过率:   {report.pass_rate:.2%}")
+    print(f"Pass@K:   {report.pass_at_k:.4f} (至少一次成功)")
+    print(f"Pass^K:   {report.pass_pow_k:.4f} (全部成功)")
+    print(f"测试次数: {len(report.trials)}")
+    print(f"平均耗时: {report.avg_duration_ms / 1000:.1f}s")
 
     for i, trial in enumerate(report.trials):
         status = "✓" if trial.reward >= 0.5 else "✗"
-        print(f"  Trial {i + 1}: {status} {trial.reward:.2%}")
+        print(f"  测试 {i + 1}: {status} {trial.reward:.2%}")
 
         for grader in trial.graders:
             print(f"    - {grader.grader_type}: {grader.score:.2%} ({grader.details})")
 
-    # Print skill statistics
+    # 打印技能统计信息
     if report.skill_statistics:
         print(f"\n{'─' * 40}")
-        print("Skill Statistics:")
+        print("技能统计信息:")
         for stat in report.skill_statistics:
-            print(f"  {stat['skillName']}:")
-            print(f"    Quality Score:     {stat['qualityScore']:.2f}")
-            print(f"    Trigger Accuracy:  {stat['triggerAccuracy']:.2%}")
-            print(f"    False Positive:    {stat['falsePositiveRate']:.2%}")
-            if stat.get('taskCompletionScore'):
-                print(f"    Task Completion:   {stat['taskCompletionScore']:.2%}")
+            print(f"\n  [{stat['skillName']}]")
+            print(f"    质量得分:     {stat['qualityScore']:.2f}")
+            if stat.get('taskCompletionScore') is not None:
+                print(f"      ├── 任务完成: {stat['taskCompletionScore']:.2%} (权重 70%)")
+            if stat.get('efficiencyScore') is not None:
+                print(f"      └── 效率得分: {stat['efficiencyScore']:.2%} (权重 30%)")
+            print(f"    触发准确率:   {stat['triggerAccuracy']:.2%}")
+            print(f"    误触发率:     {stat['falsePositiveRate']:.2%}")
+            if stat.get('deepUsageAccuracy') is not None:
+                print(f"    深度使用率:   {stat['deepUsageAccuracy']:.2%}")
