@@ -177,6 +177,7 @@ def parse_grader(
         weight=grader_raw.get("weight", 1.0),
         model=grader_raw.get("model", defaults.get("grader_model")),
         setup=grader_raw.get("setup"),
+        expected_trigger=grader_raw.get("expectedTrigger", grader_raw.get("expected_trigger")),
     )
 
 

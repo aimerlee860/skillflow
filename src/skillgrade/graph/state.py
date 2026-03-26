@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class SmokeState(TypedDict, total=False):
@@ -21,8 +22,12 @@ class SmokeState(TypedDict, total=False):
     grader_configs: list[dict[str, Any]]
     skill_paths: list[str]
 
-    results: list[dict[str, Any]]
-    logs: list[dict[str, Any]]
+    # 工作目录（由 setup_node 创建）
+    workspace: str
+
+    # 使用 Annotated 和 operator.add 来实现列表追加
+    results: Annotated[list[dict[str, Any]], operator.add]
+    logs: Annotated[list[dict[str, Any]], operator.add]
 
     current_trial: int
     total_trials: int
@@ -33,6 +38,9 @@ class SmokeState(TypedDict, total=False):
     # Skill tracking fields
     skill_tracking_enabled: bool
     skill_tracking_reports: list[dict[str, Any]]
+
+    # Debug directory for saving grader prompts/responses
+    debug_dir: str | None
 
 
 class TrialState(TypedDict, total=False):

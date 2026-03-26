@@ -63,6 +63,7 @@ async def run_smoke_eval(
     task: dict[str, Any],
     trials: int = 5,
     skill_paths: list[str] | None = None,
+    debug_dir: str | None = None,
 ) -> EvalReport:
     """Run a smoke evaluation for a single task.
 
@@ -70,11 +71,18 @@ async def run_smoke_eval(
         task: Task configuration dictionary
         trials: Number of trials to run
         skill_paths: Optional list of skill paths to inject
+        debug_dir: Optional directory to save grader prompts/responses for debugging.
+                   Can also be set via SKILLGRADE_DEBUG_DIR environment variable.
 
     Returns:
         EvalReport with aggregated results
     """
+    import os
+
     graph = create_smoke_graph()
+
+    # 优先使用参数，其次使用环境变量
+    effective_debug_dir = debug_dir or os.environ.get("SKILLGRADE_DEBUG_DIR")
 
     initial_state: SmokeState = {
         "task_name": task["name"],
@@ -82,6 +90,10 @@ async def run_smoke_eval(
         "workspace_config": task.get("workspace", []),
         "grader_configs": task.get("graders", []),
         "skill_paths": skill_paths or [],
+        "agent_model": task.get("agent") or os.environ.get("LLM_MODEL_NAME", "gpt-4o"),
+        "agent_timeout": task.get("timeout", 300),
+        "llm_base_url": os.environ.get("LLM_BASE_URL", ""),
+        "llm_api_key": os.environ.get("LLM_API_KEY", ""),
         "results": [],
         "logs": [],
         "current_trial": 0,
@@ -90,6 +102,7 @@ async def run_smoke_eval(
         "error": None,
         "skill_tracking_enabled": True,
         "skill_tracking_reports": [],
+        "debug_dir": effective_debug_dir,
     }
 
     # Collect all state updates from the graph
@@ -192,7 +205,7 @@ async def run_quick_eval(
     Returns:
         Evaluation result dictionary
     """
-    from ..agents import OAIAgent
+    from ..agents import DeepAgent
     from ..graders import DeterministicGrader, LLMGrader
     from ..types import GraderConfig, GraderType
 
@@ -202,7 +215,7 @@ async def run_quick_eval(
     )
 
     try:
-        agent = OAIAgent(
+        agent = DeepAgent(
             skill_paths=skill_paths,
             enable_tracking=len(skill_paths or []) > 0,
         )

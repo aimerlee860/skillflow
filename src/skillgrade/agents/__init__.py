@@ -1,6 +1,6 @@
 """Agents module initialization."""
 
 from .base import BaseAgent
-from .oai_agent import OAIAgent
+from .deep_agent import DeepAgent
 
-__all__ = ["BaseAgent", "OAIAgent"]
+__all__ = ["BaseAgent", "DeepAgent"]

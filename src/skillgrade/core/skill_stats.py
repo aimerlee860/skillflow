@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
+
+from ..types import SkillTrackingReport
 
 
 @dataclass
@@ -39,7 +41,7 @@ class SkillStatistics:
 
 
 def calculate_skill_statistics(
-    tracking_reports: list[dict[str, Any]],
+    tracking_reports: list[Union[SkillTrackingReport, dict[str, Any]]],
     trial_results: list[dict[str, Any]],
 ) -> list[SkillStatistics]:
     """Calculate comprehensive skill statistics.
@@ -60,7 +62,7 @@ def calculate_skill_statistics(
     False positive rate (injection accuracy) is tracked separately.
 
     Args:
-        tracking_reports: List of skill tracking reports
+        tracking_reports: List of skill tracking reports (SkillTrackingReport or dict)
         trial_results: List of trial results with tracking data
 
     Returns:
@@ -69,7 +71,13 @@ def calculate_skill_statistics(
     statistics = []
 
     for report in tracking_reports:
-        skill_name = report["skillName"]
+        # Handle both SkillTrackingReport objects and dicts
+        if isinstance(report, SkillTrackingReport):
+            skill_name = report.skill_name
+            false_positive_rate = report.false_positive_rate
+        else:
+            skill_name = report["skillName"]
+            false_positive_rate = report.get("falsePositiveRate", 0)
 
         # Gather per-trial data
         trials_with_skill = [
@@ -197,7 +205,7 @@ def calculate_skill_statistics(
             skill_name=skill_name,
             trigger_accuracy=trigger_accuracy,
             deep_usage_accuracy=deep_usage_accuracy,
-            false_positive_rate=report.get("falsePositiveRate", 0),
+            false_positive_rate=false_positive_rate,
             shallow_usage_rate=shallow_rate,
             avg_time_to_first_access=avg_time_to_first,
             avg_access_count_per_trial=avg_access_count,

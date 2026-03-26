@@ -6,8 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..agents import OAIAgent
-from ..graders import DeterministicGrader, LLMGrader
+from ..agents import DeepAgent
+from ..graders import DeterministicGrader, LLMGrader, TriggerGrader
 from ..providers import LocalProvider
 from ..types import GraderType
 from .state import SmokeState, TrialState
@@ -53,16 +53,22 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
     skill_paths = state.get("skill_paths", [])
     skill_tracking_enabled = state.get("skill_tracking_enabled", True)
 
-    agent = OAIAgent(
+    # Use DeepAgent with native skill support from deepagents framework
+    agent = DeepAgent(
+        model_name=state.get("agent_model"),
+        base_url=state.get("llm_base_url"),
+        api_key=state.get("llm_api_key"),
         skill_paths=skill_paths,
         enable_tracking=skill_tracking_enabled and len(skill_paths) > 0,
     )
     workspace = state.get("workspace", "")
+    timeout = state.get("agent_timeout", 300)
 
     try:
         output, tool_logs, skill_tracking_logs = await agent.run(
             instruction=state["instruction"],
             workspace=workspace,
+            timeout=timeout,
         )
 
         # Get skill tracking reports from tracker
@@ -71,33 +77,29 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
             reports = agent.get_skill_tracker().generate_report()
             skill_reports = [r.to_dict() for r in reports]
 
+        # 保留 agent 生成的原始日志格式
+        # agent logs 已经有正确的 type 和 data 结构
+        agent_logs = [
+            {
+                "timestamp": time.time(),
+                **log,  # 保留原始 type 和 data 结构
+            }
+            for log in tool_logs
+        ]
+
         return {
-            "logs": [
-                {
-                    "type": "agent_result",
-                    "timestamp": time.time(),
-                    "data": {"output": output},
-                }
-            ]
-            + [
-                {
-                    "type": "tool_call",
-                    "timestamp": time.time(),
-                    "data": log,
-                }
-                for log in tool_logs
-            ]
-            + skill_tracking_logs,
+            "logs": agent_logs + skill_tracking_logs,
             "skill_tracking_reports": skill_reports,
         }
 
     except Exception as e:
+        import traceback
         return {
             "logs": [
                 {
                     "type": "agent_error",
                     "timestamp": time.time(),
-                    "data": {"error": str(e)},
+                    "data": {"error": str(e), "traceback": traceback.format_exc()},
                 }
             ],
         }
@@ -116,6 +118,26 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
     grader_configs = state.get("grader_configs", [])
     logs = state.get("logs", [])
     skill_tracking_reports = state.get("skill_tracking_reports", [])
+    debug_dir = state.get("debug_dir")  # 获取调试目录
+
+    # 为 grader 注入 task_name 和 trial_index 信息
+    # 这样 LLM Grader 的 debug 日志可以正确命名
+    task_name = state.get("task_name", "unknown")
+    trial_index = state.get("current_trial", 0)
+
+    # 在日志开头插入 agent_start 信息（如果不存在）
+    if not any(log.get("type") == "agent_start" for log in logs):
+        logs = [
+            {
+                "type": "agent_start",
+                "timestamp": time.time(),
+                "data": {
+                    "task_name": task_name,
+                    "trial_index": trial_index,
+                    "instruction": state.get("instruction", ""),
+                },
+            }
+        ] + logs
 
     grader_results = []
 
@@ -124,8 +146,10 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
 
         if grader_type == GraderType.DETERMINISTIC:
             grader = DeterministicGrader()
+        elif grader_type == GraderType.TRIGGER:
+            grader = TriggerGrader()
         else:
-            grader = LLMGrader()
+            grader = LLMGrader(debug_dir=debug_dir)
 
         from ..types import GraderConfig
 
@@ -135,6 +159,7 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
             rubric=config.get("rubric"),
             weight=config.get("weight", 1.0),
             model=config.get("model"),
+            expected_trigger=config.get("expected_trigger", config.get("expectedTrigger")),
         )
 
         result = await grader.grade(workspace=workspace, config=grader_config, logs=logs)

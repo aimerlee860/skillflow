@@ -23,6 +23,7 @@ async def run_smoke(
     output_dir: Path | None = None,
     quiet: bool = False,
     show_progress: bool = True,
+    debug_dir: str | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run smoke evaluation on a skill.
 
@@ -34,6 +35,7 @@ async def run_smoke(
         output_dir: Optional output directory for reports
         quiet: Suppress output
         show_progress: Show progress bars
+        debug_dir: Optional directory to save grader prompts/responses for debugging
 
     Returns:
         Tuple of (list of reports, output_dir)
@@ -66,6 +68,7 @@ async def run_smoke(
                     task_dict,
                     trials=trials,
                     skill_paths=skill_paths,
+                    debug_dir=debug_dir,
                 )
                 pbar.update(trials)
         else:
@@ -73,6 +76,7 @@ async def run_smoke(
                 task_dict,
                 trials=trials,
                 skill_paths=skill_paths,
+                debug_dir=debug_dir,
             )
 
         # Calculate skill statistics from trial results

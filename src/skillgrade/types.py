@@ -12,6 +12,7 @@ class GraderType(str, Enum):
 
     DETERMINISTIC = "deterministic"
     LLM_RUBRIC = "llm_rubric"
+    TRIGGER = "trigger"  # 基于技能追踪数据的触发判定评估器
 
 
 # =============================================================================
@@ -134,6 +135,7 @@ class GraderConfig:
     weight: float = 1.0
     model: str | None = None
     setup: str | None = None
+    expected_trigger: bool | None = None  # 用于 TriggerGrader
 
 
 @dataclass
@@ -175,6 +177,12 @@ class LogType(str, Enum):
     SETUP = "setup"
     CLEANUP = "cleanup"
     SKILL_TRACKING = "skill_tracking"
+    # Agent 交互日志类型
+    USER_INPUT = "user_input"
+    SYSTEM_MESSAGE = "system_message"
+    AI_THINKING = "ai_thinking"
+    TOOL_CALL_DECISION = "tool_call_decision"
+    TOOL_RESULT = "tool_result"
 
 
 class SkillAccessType(str, Enum):
@@ -380,6 +388,8 @@ class TaskConfig:
 
     name: str
     instruction: str
+    expected: str | None = None  # 期望结果（用于输出对比）
+    expected_trigger: bool = True  # 是否应该触发技能
     workspace: list[WorkspaceFile] = field(default_factory=list)
     graders: list[GraderConfig] = field(default_factory=list)
     trials: int = 5
@@ -389,9 +399,11 @@ class TaskConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for LangGraph serialization."""
-        return {
+        result = {
             "name": self.name,
             "instruction": self.instruction,
+            "expected": self.expected,
+            "expectedTrigger": self.expected_trigger,
             "workspace": [{"src": w.src, "dest": w.dest, "chmod": w.chmod} for w in self.workspace],
             "graders": [
                 {
@@ -401,12 +413,18 @@ class TaskConfig:
                     "weight": g.weight,
                     "model": g.model,
                     "setup": g.setup,
+                    "expectedTrigger": g.expected_trigger,
                 }
                 for g in self.graders
             ],
             "trials": self.trials,
             "timeout": self.timeout,
         }
+        if self.agent:
+            result["agent"] = self.agent
+        if self.provider:
+            result["provider"] = self.provider
+        return result
 
 
 @dataclass
@@ -463,3 +481,7 @@ class SmokeState(TypedDict, total=False):
     skill_paths: list[str]
     skill_tracking_enabled: bool
     skill_tracking_reports: list[dict[str, Any]]
+    agent_model: str
+    agent_timeout: int
+    llm_base_url: str
+    llm_api_key: str

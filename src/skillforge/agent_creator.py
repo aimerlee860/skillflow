@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from langgraph.prebuilt import create_react_agent
+from deepagents import create_deep_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from skillgrade.llm.client import LLMClient
@@ -53,11 +53,11 @@ class SkillCreatorAgent:
         # Build system prompt from skill-creator
         self.system_prompt = self._build_system_prompt()
 
-        # Create the ReAct agent
-        self.graph = create_react_agent(
+        # Create the deep agent with skill-creator context
+        self.graph = create_deep_agent(
             model=self.llm_client.chat,
             tools=self.tools,
-            prompt=self.system_prompt,
+            system_prompt=self.system_prompt,
         )
 
     def _load_skill_creator(self) -> str:
