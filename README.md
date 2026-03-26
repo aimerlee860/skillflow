@@ -12,6 +12,8 @@ A unified CLI for managing AI agent skills with LLM-powered creation, comprehens
 - **Comprehensive Evaluation**: TASK-level and SKILL-level metrics with skill tracking
 - **Autonomous Evolution**: AI-driven skill improvement with intelligent operator selection
 - **LangGraph Workflow**: State-machine based evaluation pipeline with ReAct agent pattern
+- **DeepAgents Integration**: Native skill support via deepagents framework with progressive disclosure
+- **Skill Trigger Detection**: Automatic detection of skill file access (SKILL.md, references/, scripts/)
 
 ## Installation
 
@@ -248,9 +250,15 @@ src/
 │   │   ├── skill_tracking.py # Skill file access tracking
 │   │   └── skill_stats.py    # Skill statistics
 │   ├── agents/           # Agent implementations
+│   │   ├── base.py           # Base agent interface
+│   │   └── deep_agent.py     # DeepAgents integration with skill tracking
+│   ├── middleware/       # Agent middleware
+│   │   └── skill_tracking.py # Skill access tracking middleware
 │   ├── graph/            # LangGraph workflow
 │   ├── tools/            # Agent tools
 │   ├── graders/          # Evaluation graders
+│   │   ├── llm_rubric.py     # LLM-based rubric grading
+│   │   └── trigger_grader.py # Skill trigger detection
 │   └── reporters/        # Result reporters
 
 └── skillevol/         # Skill evolution module
@@ -380,6 +388,7 @@ skillflow create my-skill --desc "处理转账" --lang en
 
 - **langchain** / **langgraph**: Agent framework and workflow
 - **langchain-openai**: OpenAI LLM integration
+- **deepagents**: DeepAgents framework with native skill support and progressive disclosure
 - **jinja2**: Template engine for skill generation
 - **pyyaml**: YAML configuration parsing
 - **httpx**: HTTP client
