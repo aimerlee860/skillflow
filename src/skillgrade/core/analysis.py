@@ -519,16 +519,16 @@ class SkillAnalyzer:
                 input_text = ""
                 output_text = ""
 
-                # 匹配用户输入
+                # 匹配用户输入（遇到处理流程、技能输出、代码块等就停止）
                 input_match = re.search(
-                    r"(?:\*\*用户输入\*\*|\*\*Input\*\*|用户输入|Input)[:：]?\s*[\"\']?(.+?)(?=\*\*技能输出|\*\*Output|\*\*技能\*输出|技能输出|```|$)",
+                    r"(?:\*\*用户输入\*\*|\*\*Input\*\*|用户输入|Input)[:：]?\s*[\"\']?(.+?)(?=\*\*处理流程|\*\*技能输出|\*\*Output|\*\*技能\*输出|技能输出|处理流程|```|$)",
                     content,
                     re.IGNORECASE | re.DOTALL,
                 )
                 if input_match:
                     input_text = input_match.group(1).strip()
-                    # 清理引号
-                    input_text = input_text.strip("\"'")
+                    # 清理引号和尾部空白
+                    input_text = input_text.strip("\"'").strip()
 
                 # 匹配技能输出（代码块）
                 output_match = re.search(

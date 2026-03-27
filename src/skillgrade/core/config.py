@@ -92,18 +92,18 @@ def save_eval_config(config: EvalConfig | dict[str, Any], output_path: Path) -> 
         config = config.to_dict()
 
     # Remove unnecessary fields for saved config
-    model_name = _get_current_model_name()
     if "defaults" in config:
         config["defaults"].pop("docker", None)
         config["defaults"].pop("environment", None)
         config["defaults"].pop("provider", None)
-        config["defaults"]["agent"] = model_name
-        config["defaults"]["grader_model"] = model_name
+        # Don't write agent and grader_model - read from LLM_MODEL_NAME at runtime
+        config["defaults"].pop("agent", None)
+        config["defaults"].pop("grader_model", None)
 
-    # Update grader model in each task
+    # Remove grader model - read from LLM_MODEL_NAME at runtime
     for task in config.get("tasks", []):
         for grader in task.get("graders", []):
-            grader["model"] = model_name
+            grader.pop("model", None)
 
     content = yaml.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
     output_path.write_text(content)
@@ -246,8 +246,17 @@ def normalize_grader_weights(graders: list[dict[str, Any]]) -> list[dict[str, An
     return graders
 
 
-def save_report(report: EvalReport, output_dir: Path) -> Path:
-    """Save an evaluation report to JSON file."""
+def save_report(report: EvalReport, output_dir: Path, include_logs: bool = False) -> Path:
+    """Save an evaluation report to JSON file.
+
+    Args:
+        report: The evaluation report to save
+        output_dir: Directory to save the report
+        include_logs: Whether to include detailed agent interaction logs
+
+    Returns:
+        Path to the saved file
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     import orjson
 
@@ -256,27 +265,141 @@ def save_report(report: EvalReport, output_dir: Path) -> Path:
     filepath = output_dir / filename
 
     with open(filepath, "wb") as f:
-        f.write(orjson.dumps(report.to_dict(), option=orjson.OPT_INDENT_2))
+        f.write(orjson.dumps(report.to_dict(include_logs=include_logs), option=orjson.OPT_INDENT_2))
 
     return filepath
 
 
-def generate_eval_plan(skill_dir: Path, model: str | None = None) -> EvalConfig:
-    """Generate a comprehensive evaluation plan based on deep skill analysis.
+def save_summary_report(
+    reports: list[EvalReport],
+    output_dir: Path,
+    skill_name: str | None = None,
+    model_name: str | None = None,
+) -> Path:
+    """Save a comprehensive summary report combining all task results.
 
-    This function analyzes the skill directory thoroughly, including:
-    - SKILL.md content (frontmatter + all sections)
-    - Associated resources (references/, scripts/, assets/)
-    - Core functions, workflows, validation rules, examples
+    This generates evaluation_report.json with:
+    - Metadata (skill name, timestamp, model, trials)
+    - Aggregate metrics across all tasks
+    - Aggregate skill statistics
+    - Detailed task reports with full agent interaction logs
+
+    Args:
+        reports: List of evaluation reports (one per task)
+        output_dir: Directory to save the report
+        skill_name: Optional skill name for metadata
+        model_name: Optional model name for metadata
+
+    Returns:
+        Path to the saved summary file
+    """
+    from datetime import datetime
+    import orjson
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Calculate aggregate metrics
+    total_trials = sum(len(r.trials) for r in reports)
+    total_passes = sum(
+        sum(1 for t in r.trials if t.reward >= 0.5)
+        for r in reports
+    )
+    overall_pass_rate = total_passes / total_trials if total_trials > 0 else 0.0
+
+    # Calculate pass@k and pass^k
+    k = min(total_trials, 5)
+    if k > 0:
+        pass_at_k = 1 - (1 - overall_pass_rate) ** k
+        pass_pow_k = overall_pass_rate ** k
+    else:
+        pass_at_k = 0.0
+        pass_pow_k = 0.0
+
+    # Aggregate skill statistics
+    all_skill_stats: dict[str, list[dict]] = {}
+    for report in reports:
+        for stat in report.skill_statistics:
+            skill = stat.get("skillName", "unknown")
+            if skill not in all_skill_stats:
+                all_skill_stats[skill] = []
+            all_skill_stats[skill].append(stat)
+
+    aggregated_skill_stats = []
+    for skill_name_key, stats_list in all_skill_stats.items():
+        avg_stat = {
+            "skillName": skill_name_key,
+            "taskCount": len(stats_list),
+            "avgQualityScore": sum(s.get("qualityScore", 0) for s in stats_list) / len(stats_list),
+            "avgTriggerAccuracy": sum(s.get("triggerAccuracy", 0) for s in stats_list) / len(stats_list),
+            "avgFalsePositiveRate": sum(s.get("falsePositiveRate", 0) for s in stats_list) / len(stats_list),
+            "avgTaskCompletionScore": sum(s.get("taskCompletionScore", 0) for s in stats_list) / len(stats_list),
+            "avgEfficiencyScore": sum(s.get("efficiencyScore", 0) for s in stats_list) / len(stats_list),
+            "avgDeepUsageAccuracy": sum(s.get("deepUsageAccuracy", 0) for s in stats_list) / len(stats_list),
+        }
+        aggregated_skill_stats.append(avg_stat)
+
+    # Build summary report
+    summary = {
+        "metadata": {
+            "skillName": skill_name,
+            "evaluatedAt": datetime.now().isoformat(),
+            "model": model_name,
+            "totalTrialsPerTask": reports[0].trials.__len__() if reports else 0,
+        },
+        "aggregateMetrics": {
+            "overallPassRate": overall_pass_rate,
+            "passAtK": pass_at_k,
+            "passPowK": pass_pow_k,
+            "totalTasks": len(reports),
+            "totalTrialCount": total_trials,
+            "totalPassCount": total_passes,
+        },
+        "aggregateSkillStatistics": aggregated_skill_stats,
+        "tasks": [
+            {
+                **report.to_dict(include_logs=True),  # Include full agent interaction logs
+            }
+            for report in reports
+        ],
+    }
+
+    # Save to fixed filename for easy programmatic access
+    filepath = output_dir / "evaluation_report.json"
+    with open(filepath, "wb") as f:
+        f.write(orjson.dumps(summary, option=orjson.OPT_INDENT_2))
+
+    return filepath
+
+
+def generate_eval_plan(
+    skill_dir: Path,
+    model: str | None = None,
+    include_skill_md_in_rubric: bool = False,
+    num_positive: int = 3,
+    num_negative: int = 2,
+    num_evolved: int = 2,
+) -> EvalConfig:
+    """Generate evaluation plan using LLM.
 
     Args:
         skill_dir: Path to the skill directory
         model: Optional LLM model name for grading
+        include_skill_md_in_rubric: Whether to include SKILL.md content in rubric.
+        num_positive: Number of positive test cases
+        num_negative: Number of negative test cases
+        num_evolved: Number of evolved test cases
 
     Returns:
-        EvalConfig with comprehensive test tasks and customized rubrics
+        EvalConfig with test cases
     """
     from .generator import EvalPlanGenerator
 
-    generator = EvalPlanGenerator(model=model)
+    generator = EvalPlanGenerator(
+        model=model,
+        include_skill_md_in_rubric=include_skill_md_in_rubric,
+        num_positive=num_positive,
+        num_negative=num_negative,
+        num_evolved=num_evolved,
+    )
+    return generator.generate(skill_dir)
     return generator.generate(skill_dir)

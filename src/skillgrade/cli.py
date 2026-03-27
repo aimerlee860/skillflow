@@ -8,6 +8,28 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+def _load_env_file() -> None:
+    """Load .env file from multiple locations.
+
+    Search order:
+    1. Current working directory (./env)
+    2. Project root (relative to this file's location)
+    """
+    # Try current working directory first
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        load_dotenv(cwd_env)
+        return
+
+    # Try project root (where pyproject.toml is)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    project_env = project_root / ".env"
+    if project_env.exists():
+        load_dotenv(project_env)
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the CLI argument parser.
@@ -50,6 +72,11 @@ Environment Variables:
   LLM_BASE_URL    API endpoint (e.g., https://api.openai.com/v1)
   LLM_API_KEY     API key for authentication
   LLM_MODEL_NAME  Model to use (default: gpt-4o)
+
+Configuration:
+  Environment variables can be set via .env file in:
+  - Current working directory
+  - Project root directory
         """,
     )
 
@@ -413,6 +440,9 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for error)
     """
+    # Load .env file before any command processing
+    _load_env_file()
+
     parser = create_parser()
     args = parser.parse_args()
 

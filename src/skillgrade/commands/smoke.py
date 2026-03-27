@@ -8,7 +8,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from ..core.config import load_eval_config_from_path, save_report
+from ..core.config import load_eval_config_from_path, save_report, save_summary_report
 from ..core.skill_tracking import aggregate_reports
 from ..core.skill_stats import calculate_skill_statistics
 from ..graph import run_smoke_eval
@@ -24,6 +24,8 @@ async def run_smoke(
     quiet: bool = False,
     show_progress: bool = True,
     debug_dir: str | None = None,
+    skill_name: str | None = None,
+    model_name: str | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run smoke evaluation on a skill.
 
@@ -36,6 +38,8 @@ async def run_smoke(
         quiet: Suppress output
         show_progress: Show progress bars
         debug_dir: Optional directory to save grader prompts/responses for debugging
+        skill_name: Optional skill name for metadata
+        model_name: Optional model name for metadata
 
     Returns:
         Tuple of (list of reports, output_dir)
@@ -51,7 +55,8 @@ async def run_smoke(
     if eval_yaml_path.exists():
         save_eval_config(config, output_dir / "eval.yaml")
 
-    all_reports = []
+    all_reports: list[EvalReport] = []
+    all_reports_dict: list[dict[str, Any]] = []
 
     for task in config.tasks:
         if not quiet:
@@ -86,13 +91,26 @@ async def run_smoke(
             skill_stats = calculate_skill_statistics(tracking_reports, trial_results)
             report.skill_statistics = [s.to_dict() for s in skill_stats]
 
-        report_path = save_report(report, output_dir)
-        all_reports.append(report.to_dict())
+        # Save individual task report (compact, no logs)
+        report_path = save_report(report, output_dir, include_logs=False)
+        all_reports.append(report)
+        all_reports_dict.append(report.to_dict())
 
         if not quiet:
             _print_summary(report)
 
-    return all_reports, output_dir
+    # Generate comprehensive summary report with full agent interaction logs
+    if all_reports:
+        summary_path = save_summary_report(
+            reports=all_reports,
+            output_dir=output_dir,
+            skill_name=skill_name,
+            model_name=model_name,
+        )
+        if not quiet:
+            print(f"\n汇总报告已保存: {summary_path}")
+
+    return all_reports_dict, output_dir
 
 
 def _print_summary(report: EvalReport) -> None:

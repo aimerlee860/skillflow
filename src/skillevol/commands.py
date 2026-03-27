@@ -1,6 +1,7 @@
 """Commands module for skillevol."""
 
 import asyncio
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,16 @@ from skillevol.core.llm import LLMClient
 from skillevol.core.types import EvalConfig, EvolState, ExplorerConfig, EvalResult, OperatorType
 
 console = Console()
+
+
+def _generate_eval_yaml(skill_md: Path, eval_path: Path) -> None:
+    """Generate eval.yaml from skill analysis."""
+    from skillgrade.core.config import save_eval_config
+    from skillgrade.core.generator import generate_eval_plan
+
+    skill_dir = skill_md.parent
+    config = generate_eval_plan(skill_dir)
+    save_eval_config(config, eval_path)
 
 
 async def run_evolve(
@@ -53,15 +64,22 @@ async def run_evolve(
         raise SystemExit(1)
 
     eval_config_path = eval_config or skill_path / "eval.yaml"
-    if eval_config_path and not eval_config_path.exists():
-        console.print(f"[yellow]Warning: eval.yaml not found at {eval_config_path}[/yellow]")
-        console.print("[yellow]Will attempt to run without eval.yaml[/yellow]")
+
+    # Generate eval.yaml if it doesn't exist
+    if not eval_config_path.exists():
+        console.print("[cyan]Generating eval.yaml...[/cyan]")
+        _generate_eval_yaml(skill_file, eval_config_path)
+        console.print(f"[green]✓ Generated eval.yaml at: {eval_config_path}[/green]")
 
     workspace_dir = Path(f"/tmp/skill-evol/{skill_path.name}")
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
     results_dir = skill_path / "results"
     results_dir.mkdir(exist_ok=True)
+
+    # Directory to save all evolved skill versions for harvesting
+    skills_dir = results_dir / "skills"
+    skills_dir.mkdir(exist_ok=True)
 
     program_md_content = None
     if program_md and program_md.exists():
@@ -180,6 +198,14 @@ async def run_evolve(
             experiment_record.timestamp = datetime.now()
             _write_result_row(results_file, experiment_record)
 
+            # Save every evolved skill version to results/skills/{iteration_id}/
+            # Including all dependencies (scripts/, assets/, references/, etc.)
+            iteration_id = f"iter_{state.iteration + 1:03d}_{op_type.value}"
+            skill_version_dir = skills_dir / iteration_id
+            _save_skill_version(skill_version_dir, skill_path, new_skill_md)
+            # Save evaluation result alongside the skill
+            _save_eval_summary(skill_version_dir, new_result, op_type, changes_summary, keep)
+
             if keep:
                 console.print(
                     f"\n[green]✓ Improved![/green] {new_result.combined_score:.3f} > {state.best_score:.3f}"
@@ -203,9 +229,6 @@ async def run_evolve(
             state.iteration += 1
             progress.advance(task)
 
-            if keep_workspace and keep:
-                _save_skill_md(workspace_dir / f"best_iteration_{state.iteration}", new_skill_md)
-
     progress.update(task, completed=max_iterations)
 
     console.print()
@@ -220,10 +243,59 @@ async def _run_baseline_evaluation(evaluator: Evaluator, skill_md: str) -> Optio
         console.print(
             f"[green]Baseline: pass_rate={result.pass_rate:.2%}, pass_at_k={result.pass_at_k:.2%}, combined={result.combined_score:.3f}[/green]"
         )
+        if result.pass_rate == 0.0 or result.combined_score == 0.0:
+            _print_eval_diagnostics("Baseline", result)
         return result
     except Exception as e:
         console.print(f"[red]Baseline evaluation failed: {e}[/red]")
         return None
+
+
+def _print_eval_diagnostics(label: str, result: EvalResult) -> None:
+    """Print trial-level diagnostics for failed or zero-score evaluations."""
+    console.print(f"[yellow]{label} diagnostics:[/yellow]")
+    console.print(
+        "  "
+        f"reward={result.reward:.2%}, access_rate={result.access_rate:.2%}, "
+        f"deep_usage_rate={result.deep_usage_rate:.2%}, effective_usage_rate={result.effective_usage_rate:.2%}, "
+        f"quality_score={result.quality_score:.3f}"
+    )
+
+    try:
+        data = json.loads(result.raw_output)
+    except json.JSONDecodeError:
+        raw = result.raw_output.strip()
+        if raw:
+            snippet = raw[:1200]
+            console.print(f"  raw_output: {snippet}")
+        return
+
+    reports = data.get("results", [])
+    if not reports:
+        console.print("  No per-task results were returned.")
+        return
+
+    for report in reports:
+        task_name = report.get("taskName", "unknown")
+        console.print(
+            "  "
+            f"task={task_name}, pass_rate={report.get('passRate', 0.0):.2%}, "
+            f"pass_at_k={report.get('passAtK', 0.0):.2%}"
+        )
+
+        for trial in report.get("trials", []):
+            grader_summaries = ", ".join(
+                f"{grader.get('graderType', 'unknown')}={grader.get('score', 0.0):.2%}({grader.get('details', '')})"
+                for grader in trial.get("graders", [])
+            )
+            trial_error = trial.get("error")
+            if trial_error:
+                grader_summaries = f"{grader_summaries}, error={trial_error}" if grader_summaries else f"error={trial_error}"
+            console.print(
+                "    "
+                f"trial={trial.get('trialIndex', '?')}, reward={trial.get('reward', 0.0):.2%}"
+                + (f", {grader_summaries}" if grader_summaries else "")
+            )
 
 
 def _get_history_results(state: EvolState) -> list[tuple[str, EvalResult]]:
@@ -254,10 +326,78 @@ def _write_result_row(path: Path, record) -> None:
         )
 
 
+def _save_skill_version(
+    dest_dir: Path,
+    source_skill_path: Path,
+    new_skill_md_content: str,
+) -> None:
+    """Save a complete skill version including all dependencies.
+
+    Copies all files and directories from source skill path except:
+    - SKILL.md (we write the new version)
+    - eval.yaml (evaluation config, not part of skill)
+    - results/ (previous evaluation results)
+
+    This ensures scripts/, assets/, references/, etc. are preserved.
+    """
+    import shutil
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy all dependencies from source skill directory
+    # Only exclude root-level SKILL.md, eval.yaml, and results/
+    if source_skill_path.exists():
+        for item in source_skill_path.iterdir():
+            # Only exclude at root level
+            if item.name in ("SKILL.md", "eval.yaml", "results"):
+                continue
+
+            dest_item = dest_dir / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest_item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dest_item)
+
+    # Write the new SKILL.md content
+    (dest_dir / "SKILL.md").write_text(new_skill_md_content)
+
+
 def _save_skill_md(path: Path, content: str) -> None:
     """Save SKILL.md to a directory."""
     path.mkdir(parents=True, exist_ok=True)
     (path / "SKILL.md").write_text(content)
+
+
+def _save_eval_summary(
+    skill_dir: Path,
+    result: EvalResult,
+    op_type,
+    changes_summary: str,
+    accepted: bool,
+) -> None:
+    """Save evaluation summary alongside the skill version."""
+    import yaml
+
+    summary = {
+        "operator": op_type.value,
+        "changes_summary": changes_summary,
+        "accepted": accepted,
+        "metrics": {
+            "pass_rate": result.pass_rate,
+            "pass_at_k": result.pass_at_k,
+            "pass_pow_k": result.pass_pow_k,
+            "reward": result.reward,
+            "access_rate": result.access_rate,
+            "deep_usage_rate": result.deep_usage_rate,
+            "false_positive_rate": result.false_positive_rate,
+            "effective_usage_rate": result.effective_usage_rate,
+            "quality_score": result.quality_score,
+            "combined_score": result.combined_score,
+        },
+        "duration_seconds": result.duration_seconds,
+    }
+
+    (skill_dir / "eval_summary.yaml").write_text(yaml.dump(summary, default_flow_style=False))
 
 
 def _print_summary(state: EvolState, results_file: Path) -> None:

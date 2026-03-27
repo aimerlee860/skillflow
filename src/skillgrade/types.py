@@ -351,6 +351,7 @@ class EvalReport:
     trials: list[TrialResult]
     avg_duration_ms: float
     timestamp: str
+    instruction: str | None = None
     skill_statistics: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self, include_logs: bool = False) -> dict[str, Any]:
@@ -368,6 +369,8 @@ class EvalReport:
             "avgDurationMs": self.avg_duration_ms,
             "timestamp": self.timestamp,
         }
+        if self.instruction:
+            result["instruction"] = self.instruction
         if self.skill_statistics:
             result["skillStatistics"] = self.skill_statistics
         return result

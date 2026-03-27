@@ -19,6 +19,7 @@ class SkillStatistics:
     shallow_usage_rate: float
     avg_time_to_first_access: float
     avg_access_count_per_trial: float
+    effective_usage_rate: float
     # Quality score components
     task_completion_score: float  # Task success rate
     efficiency_score: float  # Higher for less resource usage
@@ -34,6 +35,7 @@ class SkillStatistics:
             "shallowUsageRate": self.shallow_usage_rate,
             "avgTimeToFirstAccess": self.avg_time_to_first_access,
             "avgAccessCountPerTrial": self.avg_access_count_per_trial,
+            "effectiveUsageRate": self.effective_usage_rate,
             "taskCompletionScore": self.task_completion_score,
             "efficiencyScore": self.efficiency_score,
             "qualityScore": self.quality_score,
@@ -146,6 +148,9 @@ def calculate_skill_statistics(
             if accessed_trials
             else 0
         )
+        effective_usage_rate = (
+            len(deep_usage_trials) / len(trials_with_skill) if trials_with_skill else 0
+        )
 
         # === QUALITY SCORE CALCULATION ===
         # Three-factor evaluation:
@@ -209,6 +214,7 @@ def calculate_skill_statistics(
             shallow_usage_rate=shallow_rate,
             avg_time_to_first_access=avg_time_to_first,
             avg_access_count_per_trial=avg_access_count,
+            effective_usage_rate=effective_usage_rate,
             task_completion_score=task_completion_score,
             efficiency_score=efficiency_score,
             quality_score=quality_score,

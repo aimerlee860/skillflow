@@ -89,6 +89,56 @@ def _print_aggregated_summary(reports: list[dict[str, Any]]) -> None:
             print(f"  平均深度使用率: {avg_deep_usage:.2%}")
 
 
+def _build_json_output(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build aggregated JSON output with stable metric semantics."""
+    if not reports:
+        return {"error": "No results", "pass_rate": 0.0}
+
+    all_trials = [trial for report in reports for trial in report.get("trials", [])]
+    total_trials = len(all_trials)
+    total_passes = sum(1 for trial in all_trials if trial.get("reward", 0) >= 0.5)
+    pass_rate = total_passes / total_trials if total_trials > 0 else 0.0
+    reward = (
+        sum(trial.get("reward", 0.0) for trial in all_trials) / total_trials if total_trials > 0 else 0.0
+    )
+
+    k = min(total_trials, 5)
+    if k > 0:
+        pass_at_k = 1 - (1 - pass_rate) ** k
+        pass_pow_k = pass_rate ** k
+    else:
+        pass_at_k = 0.0
+        pass_pow_k = 0.0
+
+    all_skill_stats: dict[str, list[dict[str, Any]]] = {}
+    for report in reports:
+        for stat in report.get("skillStatistics", []):
+            skill_name = stat.get("skillName", "unknown")
+            all_skill_stats.setdefault(skill_name, []).append(stat)
+
+    output: dict[str, Any] = {
+        "pass_rate": pass_rate,
+        "pass_at_k": pass_at_k,
+        "pass_pow_k": pass_pow_k,
+        "reward": reward,
+        "trials": total_trials,
+        "results": reports,
+    }
+
+    if all_skill_stats:
+        primary_skill = next(iter(all_skill_stats.values()))
+        stat_count = len(primary_skill)
+        output["access_rate"] = sum(s.get("triggerAccuracy", 0.0) for s in primary_skill) / stat_count
+        output["deep_usage_rate"] = sum(
+            s.get("deepUsageAccuracy", s.get("deepUsageRate", 0.0)) for s in primary_skill
+        ) / stat_count
+        output["false_positive_rate"] = sum(s.get("falsePositiveRate", 0.0) for s in primary_skill) / stat_count
+        output["effective_usage_rate"] = sum(s.get("effectiveUsageRate", 0.0) for s in primary_skill) / stat_count
+        output["quality_score"] = sum(s.get("qualityScore", 0.0) for s in primary_skill) / stat_count
+
+    return output
+
+
 async def run_eval(
     skill_dir: Path,
     trials: int = 5,
@@ -147,6 +197,11 @@ async def run_eval(
         config = runner.get_config()
         skill_paths = runner.get_skill_paths()
 
+        # Extract skill name and model name for report metadata
+        import os
+        skill_name = skill_dir.name
+        model_name = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
+
         reports, results_dir = await run_smoke(
             config=config,
             temp_dir=temp_dir,
@@ -155,47 +210,12 @@ async def run_eval(
             output_dir=runner.results_dir,
             quiet=quiet or json_output,
             show_progress=show_progress and not json_output,
+            skill_name=skill_name,
+            model_name=model_name,
         )
 
         if json_output:
-            # Output aggregated results as JSON to stdout
-            if reports:
-                # Aggregate metrics across all tasks
-                total_trials = sum(len(r.get("trials", [])) for r in reports)
-                total_passes = sum(
-                    sum(1 for t in r.get("trials", []) if t.get("reward", 0) >= 0.5)
-                    for r in reports
-                )
-                pass_rate = total_passes / total_trials if total_trials > 0 else 0.0
-
-                # Calculate pass@k
-                import math
-                pass_at_k = 1 - math.prod(1 - t.get("reward", 0) for t in reports[0].get("trials", [])) if reports else 0.0
-
-                # Get skill statistics if available
-                skill_stats = reports[0].get("skillStatistics", [{}]) if reports else [{}]
-
-                output = {
-                    "pass_rate": pass_rate,
-                    "pass_at_k": pass_at_k,
-                    "pass_pow_k": pass_rate,  # Simplified
-                    "reward": sum(r.get("avgReward", r.get("avg_reward", 0)) for r in reports) / len(reports) if reports else 0.0,
-                    "trials": total_trials,
-                    "results": reports,
-                }
-
-                # Add skill metrics if available
-                if skill_stats:
-                    stat = skill_stats[0] if skill_stats else {}
-                    output["access_rate"] = stat.get("triggerAccuracy", 1.0)
-                    output["deep_usage_rate"] = stat.get("deepUsageRate", 0.0)
-                    output["false_positive_rate"] = stat.get("falsePositiveRate", 0.0)
-                    output["effective_usage_rate"] = stat.get("effectiveUsageRate", 0.0)
-                    output["quality_score"] = stat.get("qualityScore", 0.0)
-
-                print(json.dumps(output))
-            else:
-                print(json.dumps({"error": "No results", "pass_rate": 0.0}))
+            print(json.dumps(_build_json_output(reports)))
         elif not quiet:
             # 打印聚合指标和技能统计信息
             _print_aggregated_summary(reports)

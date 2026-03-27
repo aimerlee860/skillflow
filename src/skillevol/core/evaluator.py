@@ -27,17 +27,37 @@ class Evaluator:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
+
+            # Copy all files from original skill directory (except SKILL.md which we'll write)
+            # This ensures references/, scripts/, and other dependencies are available
+            if self.config.skill_path and self.config.skill_path.exists():
+                for item in self.config.skill_path.iterdir():
+                    if item.name == "SKILL.md":
+                        continue  # We'll write the modified SKILL.md below
+                    dest = workspace / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest)
+                    else:
+                        shutil.copy2(item, dest)
+
+            # Write the (possibly modified) SKILL.md
             skill_file = workspace / "SKILL.md"
             skill_file.write_text(skill_md_content)
 
+            has_eval_config = False
             if self.config.eval_config_path and self.config.eval_config_path.exists():
                 shutil.copy(self.config.eval_config_path, workspace / "eval.yaml")
+                has_eval_config = True
 
             start_time = time.time()
             try:
                 result = await asyncio.wait_for(
-                    self._run_skillgrade(workspace),
-                    timeout=self.config.timeout_seconds + 30,
+                    self._run_skillgrade(workspace, skip_init=has_eval_config),
+                    # Allow generous timeout: each task can have its own timeout,
+                    # but we need an overall limit to prevent hanging indefinitely.
+                    # Default: num_tasks * task_timeout * trials + buffer
+                    # Since we don't know num_tasks upfront, use a reasonable max
+                    timeout=self.config.timeout_seconds * 10 * self.config.trials + 60,
                 )
             except asyncio.TimeoutError:
                 return EvalResult(
@@ -53,15 +73,20 @@ class Evaluator:
 
         return self._parse_output(result, duration)
 
-    async def _run_skillgrade(self, workspace: Path) -> str:
+    async def _run_skillgrade(self, workspace: Path, skip_init: bool = False) -> str:
         cmd = [
             self.config.skillgrade_cmd,
             "eval",
             str(workspace),
             "--trials",
             str(self.config.trials),
-            "--json",
         ]
+
+        # Only skip init if we have an existing eval.yaml
+        if skip_init:
+            cmd.append("--skip-init")
+
+        cmd.append("--json")
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -88,15 +113,17 @@ class Evaluator:
 
             # SKILL-level metrics
             access_rate = float(data.get("access_rate", 1.0))
-            deep_usage_rate = float(data.get("deep_usage_rate", 0.0))
+            deep_usage_rate = float(
+                data.get("deep_usage_rate", data.get("deepUsageAccuracy", data.get("deepUsageRate", 0.0)))
+            )
             false_positive_rate = float(data.get("false_positive_rate", 0.0))
-            effective_usage_rate = float(data.get("effective_usage_rate", 0.0))
+            effective_usage_rate = float(
+                data.get("effective_usage_rate", data.get("effectiveUsageRate", 0.0))
+            )
             quality_score = float(data.get("quality_score", 0.0))
 
             trials = data.get("trials", self.config.trials)
-            successes = sum(
-                1 for t in data.get("results", []) if t.get("reward", 0) >= self.config.threshold
-            )
+            successes = self._count_successes_from_json(data)
         except (json.JSONDecodeError, ValueError, KeyError):
             # Fallback to text parsing
             metrics = self._parse_text_output(output)
@@ -129,6 +156,21 @@ class Evaluator:
         )
         result.compute_combined_score()
         return result
+
+    def _count_successes_from_json(self, data: dict) -> int:
+        """Count successful trials from JSON output."""
+        results = data.get("results", [])
+        successes = 0
+
+        for item in results:
+            if isinstance(item, dict) and "trials" in item:
+                successes += sum(
+                    1 for trial in item.get("trials", []) if trial.get("reward", 0) >= self.config.threshold
+                )
+            elif isinstance(item, dict) and item.get("reward", 0) >= self.config.threshold:
+                successes += 1
+
+        return successes
 
     def _parse_text_output(self, output: str) -> dict:
         """Parse text output to extract metrics when JSON parsing fails."""

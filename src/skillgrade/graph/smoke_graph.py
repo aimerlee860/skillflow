@@ -183,6 +183,7 @@ async def run_smoke_eval(
         trials=trial_results,
         avg_duration_ms=total_duration / len(trial_results) if trial_results else 0.0,
         timestamp=datetime.now().isoformat(),
+        instruction=task.get("instruction"),
     )
 
 
