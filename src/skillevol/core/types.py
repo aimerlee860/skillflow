@@ -14,6 +14,11 @@ class OperatorType(Enum):
     AUTONOMOUS = "autonomous"
 
 
+class EvolutionMode(Enum):
+    STEADY = "steady"      # Conservative: always evolve from baseline
+    GREEDY = "greedy"      # Aggressive: evolve from current best
+
+
 @dataclass
 class EvalResult:
     # TASK-level metrics
@@ -139,6 +144,7 @@ class EvalConfig:
     timeout_seconds: int = 300
     threshold: float = 0.5
     skillgrade_cmd: str = "skillflow"  # Use unified skillflow CLI
+    parallel: int = 1  # Number of tasks to evaluate in parallel
 
 
 @dataclass
@@ -158,6 +164,8 @@ class EvolState:
     current_skill_md: str
     best_skill_md: str
     best_score: float
+    baseline_skill_md: str  # Original skill for steady mode
+    baseline_score: float   # Original score for steady mode
     iteration: int
     consecutive_no_improve: int
     experiment_history: list[ExperimentRecord] = field(default_factory=list)

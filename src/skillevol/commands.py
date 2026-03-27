@@ -15,7 +15,7 @@ from skillevol.core.decision import DecisionEngine
 from skillevol.core.evaluator import Evaluator
 from skillevol.core.explorer import Explorer
 from skillevol.core.llm import LLMClient
-from skillevol.core.types import EvalConfig, EvolState, ExplorerConfig, EvalResult, OperatorType
+from skillevol.core.types import EvalConfig, EvolState, EvolutionMode, ExplorerConfig, EvalResult, OperatorType
 
 console = Console()
 
@@ -38,10 +38,12 @@ async def run_evolve(
     max_time: int = 3600,
     patience: int = 20,
     strategy: str = "hybrid",
+    mode: str = "steady",
     program_md: Optional[Path] = None,
     llm_model: Optional[str] = None,
     keep_workspace: bool = False,
     verbose: bool = False,
+    parallel: int = 1,
 ) -> None:
     """Run skill evolution.
 
@@ -53,10 +55,12 @@ async def run_evolve(
         max_time: Maximum time in seconds
         patience: Stop after N consecutive no-improvements
         strategy: Evolution strategy (hybrid, autonomous, structured)
+        mode: Evolution mode - steady (from baseline) or greedy (from best)
         program_md: Optional path to program.md
         llm_model: LLM model name (default: LLM_MODEL_NAME env var or gpt-4o)
         keep_workspace: Keep workspaces after completion
         verbose: Verbose output
+        parallel: Number of tasks to evaluate in parallel
     """
     skill_file = skill_path / "SKILL.md"
     if not skill_file.exists():
@@ -88,6 +92,7 @@ async def run_evolve(
     console.print("[bold cyan]Skill Evol[/bold cyan] - Autonomous skill optimization")
     console.print(f"  Skill: {skill_path}")
     console.print(f"  Strategy: {strategy}")
+    console.print(f"  Mode: {mode}")
     console.print(f"  Trials: {trials}")
     console.print()
 
@@ -99,6 +104,7 @@ async def run_evolve(
         skill_path=skill_path,
         eval_config_path=eval_config_path if eval_config_path and eval_config_path.exists() else None,
         trials=trials,
+        parallel=parallel,
     )
     explorer_config = ExplorerConfig(
         strategy=strategy,
@@ -107,7 +113,7 @@ async def run_evolve(
 
     evaluator = Evaluator(eval_config_obj)
     explorer = Explorer(llm_client, explorer_config, eval_config_obj, program_md_content)
-    decision_engine = DecisionEngine()
+    decision_engine = DecisionEngine(mode=mode)
 
     current_skill_md = skill_file.read_text()
 
@@ -120,6 +126,8 @@ async def run_evolve(
         current_skill_md=current_skill_md,
         best_skill_md=current_skill_md,
         best_score=baseline_result.combined_score,
+        baseline_skill_md=current_skill_md,
+        baseline_score=baseline_result.combined_score,
         iteration=0,
         consecutive_no_improve=0,
         experiment_history=[],

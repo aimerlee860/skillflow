@@ -99,6 +99,7 @@ async def run_smoke_eval(
         "current_trial": 0,
         "total_trials": trials,
         "start_time": time.time(),
+        "trial_start_time": time.time(),
         "error": None,
         "skill_tracking_enabled": True,
         "skill_tracking_reports": [],

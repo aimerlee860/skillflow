@@ -15,6 +15,9 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from rich.console import Console
+
+console = Console()
 
 
 def _load_env_file() -> None:
@@ -276,6 +279,13 @@ Examples:
         action="store_true",
         help="Include full SKILL.md content in rubric prompts (default: False to reduce prompt size)",
     )
+    p_eval.add_argument(
+        "--parallel", "-j",
+        type=int,
+        default=1,
+        dest="parallel",
+        help="Number of tasks to evaluate in parallel (default: 1, sequential)",
+    )
 
     # ========== evolve command ==========
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -322,6 +332,12 @@ Examples:
         help="Evolution strategy (default: hybrid)",
     )
     p_evolve.add_argument(
+        "--mode", "-M",
+        choices=["steady", "greedy"],
+        default="steady",
+        help="Evolution mode: steady=from baseline (default), greedy=from best",
+    )
+    p_evolve.add_argument(
         "--model",
         default=None,
         help="LLM model for evolution (default: LLM_MODEL_NAME env var or gpt-4o)",
@@ -335,6 +351,13 @@ Examples:
         "--verbose", "-v",
         action="store_true",
         help="Verbose output",
+    )
+    p_evolve.add_argument(
+        "--parallel", "-j",
+        type=int,
+        default=1,
+        dest="parallel",
+        help="Number of tasks to evaluate in parallel (default: 1, sequential)",
     )
 
     return parser
@@ -368,11 +391,11 @@ def handle_create(args) -> int:
     description = args.description
     if args.description_file:
         if not args.description_file.exists():
-            print(f"Error: Description file not found: {args.description_file}", file=sys.stderr)
+            console.print(f"[red]Error: Description file not found: {args.description_file}[/red]")
             return 1
         description = args.description_file.read_text(encoding="utf-8").strip()
     elif not args.description:
-        print("Error: Either --desc or --file is required.", file=sys.stderr)
+        console.print("[red]Error: Either --desc or --file is required.[/red]")
         return 1
 
     # Store resolved description
@@ -404,6 +427,10 @@ def _create_from_template(args) -> int:
     """Create skill from template."""
     from skillforge import SkillCreator
 
+    console.rule(f"[bold cyan]Skillflow Create[/bold cyan]")
+    console.print(f"[dim]Mode:[/dim] [green]Template[/green]  [dim]Skill:[/dim] [green]{args.name}[/green]")
+    console.print()
+
     creator = SkillCreator(lang=args._lang)
     skill_path = creator.create(
         skill_dir=args.dir,
@@ -414,8 +441,10 @@ def _create_from_template(args) -> int:
         constraints=args.constraints or [],
     )
 
-    print(f"✓ Created skill at: {skill_path}")
-    print(f"  - {skill_path / 'SKILL.md'}")
+    console.print()
+    console.print(f"[bold green]✓ Skill Created[/bold green]")
+    console.print(f"  [dim]Location:[/dim] [cyan]{skill_path}[/cyan]")
+    console.print(f"  [dim]SKILL.md:[/dim]  [cyan]{skill_path / 'SKILL.md'}[/cyan]")
     return 0
 
 
@@ -423,16 +452,21 @@ async def _create_with_llm(args) -> int:
     """Create skill using LLM."""
     from skillforge import SkillCreatorAgent
     from skillforge.creator import SkillCreator
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    console.rule(f"[bold cyan]Skillflow Create[/bold cyan]")
+    console.print(f"[dim]Mode:[/dim] [green]LLM[/green]  [dim]Skill:[/dim] [green]{args.name}[/green]")
+    console.print()
 
     base_url = args.base_url or os.environ.get("LLM_BASE_URL")
     api_key = args.api_key or os.environ.get("LLM_API_KEY")
 
     if not base_url or not api_key:
-        print("Error: LLM configuration required.", file=sys.stderr)
-        print("\nSet environment variables:", file=sys.stderr)
-        print("  export LLM_BASE_URL=https://api.openai.com/v1", file=sys.stderr)
-        print("  export LLM_API_KEY=sk-xxx", file=sys.stderr)
-        print("\nOr use --base-url and --api-key options.", file=sys.stderr)
+        console.print("[red]Error: LLM configuration required.[/red]")
+        console.print("\n[dim]Set environment variables:[/dim]")
+        console.print("  [cyan]export LLM_BASE_URL=https://api.openai.com/v1[/cyan]")
+        console.print("  [cyan]export LLM_API_KEY=sk-xxx[/cyan]")
+        console.print("\n[dim]Or use --base-url and --api-key options.[/dim]")
         return 1
 
     agent = SkillCreatorAgent(
@@ -441,27 +475,35 @@ async def _create_with_llm(args) -> int:
         model_name=args.model,
     )
 
-    if args.from_codebase:
-        print(f"Analyzing codebase at {args.from_codebase}...")
-        skill_path = await agent.analyze_codebase_for_skill(
-            codebase_path=args.from_codebase,
-            skill_name=args.name,
-            output_dir=args.dir,
-        )
-    else:
-        print(f"Creating skill '{args.name}' with LLM...")
-        skill_path = await agent.create_skill(
-            name=args.name,
-            description=args._description,
-            output_dir=args.dir,
-            context=args.context,
-            examples=args.examples,
-            template=args.template,
-        )
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}[/cyan]"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        if args.from_codebase:
+            task = progress.add_task(f"Analyzing codebase at {args.from_codebase}...", total=None)
+            skill_path = await agent.analyze_codebase_for_skill(
+                codebase_path=args.from_codebase,
+                skill_name=args.name,
+                output_dir=args.dir,
+            )
+        else:
+            task = progress.add_task(f"Creating skill '{args.name}' with LLM...", total=None)
+            skill_path = await agent.create_skill(
+                name=args.name,
+                description=args._description,
+                output_dir=args.dir,
+                context=args.context,
+                examples=args.examples,
+                template=args.template,
+            )
+        progress.update(task, completed=True)
 
-    print(f"\n✓ Created skill at: {skill_path}")
-    if (skill_path / "SKILL.md").exists():
-        print(f"  - {skill_path / 'SKILL.md'}")
+    console.print()
+    console.print(f"[bold green]✓ Skill Created[/bold green]")
+    console.print(f"  [dim]Location:[/dim] [cyan]{skill_path}[/cyan]")
+    console.print(f"  [dim]SKILL.md:[/dim]  [cyan]{skill_path / 'SKILL.md'}[/cyan]")
     return 0
 
 
@@ -472,7 +514,7 @@ def handle_eval(args) -> int:
     skill_md = skill_dir / "SKILL.md"
 
     if not skill_md.exists():
-        print(f"Error: SKILL.md not found in {skill_dir}", file=sys.stderr)
+        console.print(f"[red]Error: SKILL.md not found in {skill_dir}[/red]")
         return 1
 
     # Handle --static (static analysis only)
@@ -490,7 +532,7 @@ def handle_eval(args) -> int:
     # Handle --init (only generate eval.yaml)
     if args.init:
         _generate_eval_yaml(skill_md, eval_path, args)
-        print(f"✓ Generated eval.yaml at: {eval_path}")
+        console.print(f"[green]✓[/green] Generated eval.yaml at: [cyan]{eval_path}[/cyan]")
         return 0
 
     # Handle --skip-init or normal mode
@@ -514,6 +556,7 @@ def handle_eval(args) -> int:
             quiet=args.quiet,
             show_progress=not args.quiet,
             json_output=getattr(args, 'json', False),
+            parallel=getattr(args, 'parallel', 1),
         )
     )
     return 0
@@ -547,17 +590,26 @@ def _generate_eval_yaml(skill_md: Path, eval_path: Path, args) -> None:
     """Generate eval.yaml from skill analysis."""
     from skillgrade.core.config import save_eval_config
     from skillgrade.core.generator import generate_eval_plan
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
     skill_dir = skill_md.parent
     include_skill_md = getattr(args, "include_skill_md", False)
 
-    print(f"Analyzing skill at {skill_dir}...")
-    config = generate_eval_plan(
-        skill_dir,
-        include_skill_md_in_rubric=include_skill_md,
-    )
-    save_eval_config(config, eval_path)
-    print(f"  Generated {len(config.tasks)} test tasks based on skill analysis")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}[/cyan]"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(f"Analyzing skill at {skill_dir}...", total=None)
+        config = generate_eval_plan(
+            skill_dir,
+            include_skill_md_in_rubric=include_skill_md,
+        )
+        save_eval_config(config, eval_path)
+        progress.update(task, completed=True)
+
+    console.print(f"[dim]Generated[/dim] [green]{len(config.tasks)}[/green] [dim]test tasks[/dim]")
 
 
 def handle_evolve(args) -> int:
@@ -573,9 +625,11 @@ def handle_evolve(args) -> int:
             max_time=args.max_time,
             patience=args.patience,
             strategy=args.strategy,
+            mode=getattr(args, 'mode', 'steady'),
             llm_model=args.model,
             keep_workspace=args.keep_workspace,
             verbose=args.verbose,
+            parallel=getattr(args, 'parallel', 1),
         )
     )
     return 0

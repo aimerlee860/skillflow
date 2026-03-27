@@ -31,6 +31,7 @@ async def setup_node(state: SmokeState) -> dict[str, Any]:
 
     return {
         "workspace": str(workspace),
+        "trial_start_time": time.time(),  # 记录 trial 开始时间
         "logs": [
             {
                 "type": "setup",
@@ -180,6 +181,10 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
     total_weight = sum(r["weight"] for r in grader_results) if grader_results else 1.0
     reward = sum(r["score"] * r["weight"] for r in grader_results) / total_weight
 
+    # 计算 trial 耗时
+    trial_start = state.get("trial_start_time", time.time())
+    duration_ms = (time.time() - trial_start) * 1000
+
     # Extract skill tracking data from logs
     skill_tracking_data = [
         log["data"] for log in logs if log.get("type") == "skill_tracking"
@@ -191,7 +196,7 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
                 "trial_index": state.get("current_trial", 0),
                 "reward": reward,
                 "graders": grader_results,
-                "duration_ms": 0,
+                "duration_ms": duration_ms,
                 "skill_tracking": skill_tracking_data,
             }
         ],

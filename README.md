@@ -107,6 +107,10 @@ skillflow eval ./skills/bank-transfer --skip-init --config ./custom-eval.yaml
 # Other options
 skillflow eval ./skills/bank-transfer --trials 5 --keep-workspaces
 skillflow eval ./skills/bank-transfer --quiet
+
+# Parallel evaluation (run multiple tasks concurrently)
+skillflow eval ./skills/bank-transfer --parallel 4
+skillflow eval ./skills/bank-transfer -j 4  # shorthand
 ```
 
 **Options:**
@@ -115,6 +119,7 @@ skillflow eval ./skills/bank-transfer --quiet
 - `--config, -c`: Path to eval.yaml to use (with --skip-init)
 - `--target, -t`: Path to generate eval.yaml (only with --init)
 - `--trials, -n`: Number of trials per task (default: 5)
+- `--parallel, -j`: Number of tasks to evaluate in parallel (default: 1, sequential)
 - `--output, -o`: Output directory for results
 - `--keep-workspaces`: Keep workspace copies for debugging
 - `--quiet, -q`: Suppress output
@@ -125,8 +130,11 @@ skillflow eval ./skills/bank-transfer --quiet
 ### evolve - Automatically improve a skill
 
 ```bash
-# Basic usage
+# Basic usage (steady mode by default)
 skillflow evolve ./skills/bank-transfer --trials 5 --iterations 50
+
+# Greedy mode - evolve from current best
+skillflow evolve ./skills/bank-transfer --mode greedy
 
 # With custom strategy
 skillflow evolve ./skills/bank-transfer --strategy autonomous --model gpt-4o
@@ -138,6 +146,7 @@ skillflow evolve ./skills/bank-transfer \
   --max-time 3600 \
   --patience 20 \
   --strategy hybrid \
+  --mode steady \
   --model gpt-4o \
   --keep-workspace \
   --verbose
@@ -150,7 +159,9 @@ skillflow evolve ./skills/bank-transfer \
 - `--max-time, -t`: Max time in seconds (default: 3600)
 - `--patience, -p`: Stop after N no-improvements (default: 20)
 - `--strategy, -s`: Exploration strategy (hybrid, autonomous, structured)
+- `--mode, -M`: Evolution mode - steady (from baseline) or greedy (from best)
 - `--model`: LLM model for evolution (default: gpt-4o)
+- `--parallel, -j`: Number of tasks to evaluate in parallel (default: 1)
 - `--keep-workspace`: Keep workspaces after completion
 - `--verbose, -v`: Verbose output
 
@@ -190,6 +201,35 @@ combined_score =
 ```
 
 ## Skill Evolution System
+
+### Evolution Modes
+
+The evolution system supports two modes with different strategies for skill improvement:
+
+| Mode | Flag | Starting Point | Acceptance Criteria | Best For |
+|------|------|----------------|---------------------|----------|
+| **Steady** | `--mode steady` (default) | Always from baseline | Score > baseline | Diverse exploration, avoiding local optima |
+| **Greedy** | `--mode greedy` | From current best | Score > best + 0.01 | Fast convergence, maximum score |
+
+**Steady Mode (Default):**
+- Each iteration starts from the original skill
+- Accepts any improvement over baseline
+- Explores more diverse solutions
+- Better for discovering unexpected improvements
+
+**Greedy Mode:**
+- Each iteration starts from the current best skill
+- Only accepts significant improvements (> 0.01 threshold)
+- Converges faster to optimal solution
+- Better for fine-tuning already good skills
+
+```bash
+# Steady mode - explore diverse improvements from baseline
+skillflow evolve ./skills/my-skill --mode steady
+
+# Greedy mode - converge quickly from best known
+skillflow evolve ./skills/my-skill --mode greedy
+```
 
 ### Evolution Strategies
 

@@ -32,6 +32,7 @@ class SmokeState(TypedDict, total=False):
     current_trial: int
     total_trials: int
     start_time: float
+    trial_start_time: float  # 每个 trial 的开始时间
 
     error: str | None
 

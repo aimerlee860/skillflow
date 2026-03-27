@@ -86,6 +86,10 @@ class Evaluator:
         if skip_init:
             cmd.append("--skip-init")
 
+        # Add parallel flag if > 1
+        if self.config.parallel > 1:
+            cmd.extend(["--parallel", str(self.config.parallel)])
+
         cmd.append("--json")
 
         process = await asyncio.create_subprocess_exec(

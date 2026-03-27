@@ -329,6 +329,14 @@ Examples:
         action="store_true",
         help="Output results as JSON to stdout (for machine consumption)",
     )
+    p_eval.add_argument(
+        "--parallel",
+        "-j",
+        type=int,
+        default=1,
+        dest="parallel",
+        help="Number of tasks to evaluate in parallel (default: 1, sequential)",
+    )
     # deep-analysis removed - always use deep analysis now
 
     # evolve command
@@ -406,6 +414,14 @@ Examples:
         "-v",
         action="store_true",
         help="Verbose output",
+    )
+    p_evolve.add_argument(
+        "--parallel",
+        "-j",
+        type=int,
+        default=1,
+        dest="parallel",
+        help="Number of tasks to evaluate in parallel (default: 1, sequential)",
     )
 
     # preview command
@@ -597,6 +613,7 @@ def main() -> int:
                 show_progress=not args.quiet,
                 metrics=metrics,
                 json_output=getattr(args, 'json', False),
+                parallel=args.parallel,
             )
         )
 
@@ -616,6 +633,7 @@ def main() -> int:
                 llm_model=args.llm_model,
                 keep_workspace=args.keep_workspace,
                 verbose=args.verbose,
+                parallel=args.parallel,
             )
         )
 
