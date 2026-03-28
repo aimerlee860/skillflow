@@ -126,6 +126,13 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
     task_name = state.get("task_name", "unknown")
     trial_index = state.get("current_trial", 0)
 
+    # Get task and skill context from state
+    instruction = state.get("instruction", "")
+    expected = state.get("expected")
+    trigger = state.get("trigger", True)
+    skill_name = state.get("skill_name")
+    skill_summary = state.get("skill_summary")
+
     # 在日志开头插入 agent_start 信息（如果不存在）
     if not any(log.get("type") == "agent_start" for log in logs):
         logs = [
@@ -135,7 +142,7 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
                 "data": {
                     "task_name": task_name,
                     "trial_index": trial_index,
-                    "instruction": state.get("instruction", ""),
+                    "instruction": instruction,
                 },
             }
         ] + logs
@@ -163,7 +170,22 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
             expected_trigger=config.get("expected_trigger", config.get("expectedTrigger")),
         )
 
-        result = await grader.grade(workspace=workspace, config=grader_config, logs=logs)
+        # For LLM grader, pass task and skill context
+        if grader_type == GraderType.LLM:
+            result = await grader.grade(
+                workspace=workspace,
+                config=grader_config,
+                logs=logs,
+                # Task context from state
+                instruction=instruction,
+                expected=expected,
+                expected_trigger=trigger,
+                skill_name=skill_name,
+                skill_summary=skill_summary,
+            )
+        else:
+            result = await grader.grade(workspace=workspace, config=grader_config, logs=logs)
+
         grader_results.append(result.to_dict())
 
         state["logs"].append(

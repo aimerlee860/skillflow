@@ -244,19 +244,32 @@ async def run_evolve(
 
 
 async def _run_baseline_evaluation(evaluator: Evaluator, skill_md: str) -> Optional[EvalResult]:
-    """Run baseline evaluation."""
-    console.print("[cyan]Running baseline evaluation...[/cyan]")
-    try:
-        result = await evaluator.evaluate(skill_md)
-        console.print(
-            f"[green]Baseline: pass_rate={result.pass_rate:.2%}, pass_at_k={result.pass_at_k:.2%}, combined={result.combined_score:.3f}[/green]"
-        )
-        if result.pass_rate == 0.0 or result.combined_score == 0.0:
-            _print_eval_diagnostics("Baseline", result)
-        return result
-    except Exception as e:
-        console.print(f"[red]Baseline evaluation failed: {e}[/red]")
-        return None
+    """Run baseline evaluation with status and elapsed time only."""
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}[/cyan]"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Running baseline evaluation...", total=None)
+
+        try:
+            result = await evaluator.evaluate(skill_md)
+
+            progress.update(task, description="[green]Baseline evaluation completed[/green]")
+
+            console.print(
+                f"[green]Baseline: pass_rate={result.pass_rate:.2%}, pass_at_k={result.pass_at_k:.2%}, combined={result.combined_score:.3f}[/green]"
+            )
+            if result.pass_rate == 0.0 or result.combined_score == 0.0:
+                _print_eval_diagnostics("Baseline", result)
+            return result
+        except Exception as e:
+            progress.update(task, description=f"[red]Baseline evaluation failed: {e}[/red]")
+            console.print(f"[red]Baseline evaluation failed: {e}[/red]")
+            return None
 
 
 def _print_eval_diagnostics(label: str, result: EvalResult) -> None:

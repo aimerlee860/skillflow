@@ -14,13 +14,21 @@ class SmokeState(TypedDict, total=False):
     - Execution results and logs
     - Trial iteration state
     - Skill tracking data
+    - Skill metadata (name, summary)
+    - Task metadata (instruction, expected, trigger)
     """
 
     task_name: str
     instruction: str
+    expected: str | None  # 期望输出
+    trigger: bool  # 是否应该触发技能
     workspace_config: list[dict[str, Any]]
     grader_configs: list[dict[str, Any]]
     skill_paths: list[str]
+
+    # Skill metadata for LLM grader
+    skill_name: str | None
+    skill_summary: str | None
 
     # 工作目录（由 setup_node 创建）
     workspace: str

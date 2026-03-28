@@ -9,9 +9,12 @@ from typing import Any, Optional
 
 from deepagents import create_deep_agent
 from langchain_core.messages import HumanMessage, SystemMessage
+from rich.console import Console
 
 from skillgrade.llm.client import LLMClient
 from skillgrade.tools import shell, read_file, write_file, glob_files
+
+console = Console()
 
 
 class SkillCreatorAgent:
@@ -191,9 +194,9 @@ Remember:
             await asyncio.wait_for(run_with_early_exit(), timeout=180)
         except asyncio.TimeoutError:
             timeout_occurred = True
-            print(f"Warning: Skill creation timed out after 180 seconds")
+            console.print("[yellow]Warning: Skill creation timed out after 180 seconds[/yellow]")
         except Exception as e:
-            print(f"Error during skill creation: {e}")
+            console.print(f"[red]Error during skill creation: {e}[/red]")
         finally:
             # Clean up the marker file
             if done_marker.exists():

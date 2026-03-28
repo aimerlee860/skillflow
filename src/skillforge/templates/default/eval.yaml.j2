@@ -1,23 +1,23 @@
-version: "1"
+skill:
+  name: {{ name }}
+  summary: {{ description }}
 
-defaults:
-  agent: openai
-  provider: local
+settings:
   trials: 5
   timeout: 300
   threshold: 0.8
-  grader_model: gpt-4o
 
 tasks:
   - name: basic-task
     instruction: |
       {{ description }}
+    trigger: true
     workspace: []
     graders:
 {%- for grader in graders %}
       - type: {{ grader.type }}
         weight: {{ grader.weight }}
-{%- if grader.type == "llm_rubric" %}
+{%- if grader.type == "llm" %}
         rubric: |
 {% for line in grader.rubric.split('\n') %}          {{ line }}
 {% endfor %}
@@ -27,3 +27,5 @@ tasks:
 {% endfor %}
 {%- endif %}
 {%- endfor %}
+    trials: 5
+    timeout: 300

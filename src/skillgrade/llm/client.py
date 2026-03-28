@@ -9,8 +9,17 @@ from typing import Any
 from dotenv import load_dotenv
 
 # Load environment variables from .env file in project root
-# Path: src/skillgrade/llm/client.py -> parent=llm -> parent=skillgrade -> parent=src -> parent=project_root
-_project_root = Path(__file__).resolve().parent.parent.parent.parent
+# Try multiple strategies to find .env
+def _find_project_root() -> Path:
+    """Find project root by looking for pyproject.toml or .env."""
+    current = Path(__file__).resolve()
+    for _ in range(10):  # Max 10 levels up
+        current = current.parent
+        if (current / "pyproject.toml").exists() or (current / ".env").exists():
+            return current
+    return Path.cwd()
+
+_project_root = _find_project_root()
 _env_path = _project_root / ".env"
 load_dotenv(_env_path)
 

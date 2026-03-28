@@ -20,6 +20,15 @@ from ..graph import run_smoke_eval
 from ..types import EvalConfig, EvalReport
 
 
+def _emit_progress(current: int, total: int, task_name: str = "") -> None:
+    """Emit progress to stderr for machine consumption.
+
+    Format: PROGRESS: current/total task_name
+    """
+    import sys
+    print(f"PROGRESS: {current}/{total} {task_name}", file=sys.stderr, flush=True)
+
+
 async def run_smoke(
     config: EvalConfig,
     temp_dir: Path,
@@ -32,6 +41,7 @@ async def run_smoke(
     skill_name: str | None = None,
     model_name: str | None = None,
     parallel: int = 1,
+    json_output: bool = False,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run smoke evaluation on a skill.
 
@@ -47,6 +57,7 @@ async def run_smoke(
         skill_name: Optional skill name for metadata
         model_name: Optional model name for metadata
         parallel: Number of tasks to evaluate in parallel (default: 1, sequential)
+        json_output: Output results as JSON to stdout (also emits progress to stderr)
 
     Returns:
         Tuple of (list of reports, output_dir)
@@ -64,10 +75,15 @@ async def run_smoke(
 
     all_reports: list[EvalReport] = []
     all_reports_dict: list[dict[str, Any]] = []
+    total_tasks = len(config.tasks)
+
+    # Get skill info from config for grader context
+    skill_info_name = config.skill.name if config.skill else skill_name
+    skill_info_summary = config.skill.summary if config.skill else None
 
     if parallel <= 1 or len(config.tasks) <= 1:
         # Sequential execution (original behavior)
-        for task in config.tasks:
+        for task_idx, task in enumerate(config.tasks):
             if not quiet:
                 console.rule(f"[bold cyan]Running task: {task.name}[/bold cyan]")
 
@@ -89,6 +105,8 @@ async def run_smoke(
                         trials=trials,
                         skill_paths=skill_paths,
                         debug_dir=debug_dir,
+                        skill_name=skill_info_name,
+                        skill_summary=skill_info_summary,
                     )
                     progress.update(task_progress, completed=trials)
             else:
@@ -97,6 +115,8 @@ async def run_smoke(
                     trials=trials,
                     skill_paths=skill_paths,
                     debug_dir=debug_dir,
+                    skill_name=skill_info_name,
+                    skill_summary=skill_info_summary,
                 )
 
             # Calculate skill statistics from trial results
@@ -111,6 +131,13 @@ async def run_smoke(
             all_reports.append(report)
             all_reports_dict.append(report.to_dict())
 
+            # Emit progress to stderr for json_output mode
+            if json_output:
+                import sys
+                progress_msg = f"PROGRESS: {task_idx + 1}/{total_tasks} tasks completed\n"
+                sys.stderr.write(progress_msg)
+                sys.stderr.flush()
+
             if not quiet:
                 _print_summary(report)
     else:
@@ -121,9 +148,12 @@ async def run_smoke(
             console.print(f"[dim]Tasks:[/dim] [green]{len(config.tasks)}[/green]  [dim]Concurrency:[/dim] [green]{parallel}[/green]")
 
         semaphore = asyncio.Semaphore(parallel)
+        completed_count = 0
+        completed_lock = asyncio.Lock()
 
         async def run_single_task(task) -> EvalReport:
             """Run a single task with semaphore-based concurrency control."""
+            nonlocal completed_count
             async with semaphore:
                 task_dict = task.to_dict()
                 task_dict["trials"] = trials
@@ -133,6 +163,8 @@ async def run_smoke(
                     trials=trials,
                     skill_paths=skill_paths,
                     debug_dir=debug_dir,
+                    skill_name=skill_info_name,
+                    skill_summary=skill_info_summary,
                 )
 
                 # Calculate skill statistics from trial results
@@ -141,6 +173,15 @@ async def run_smoke(
                 if tracking_reports:
                     skill_stats = calculate_skill_statistics(tracking_reports, trial_results)
                     report.skill_statistics = [s.to_dict() for s in skill_stats]
+
+                # Emit progress to stderr for json_output mode
+                if json_output:
+                    async with completed_lock:
+                        completed_count += 1
+                        import sys
+                        progress_msg = f"PROGRESS: {completed_count}/{total_tasks} tasks completed\n"
+                        sys.stderr.write(progress_msg)
+                        sys.stderr.flush()
 
                 return report
 

@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from rich.console import Console
+
+console = Console()
 
 
 def _load_env_file() -> None:
@@ -484,7 +487,7 @@ def main() -> int:
                 if rule_path.exists():
                     rule_contents.append(rule_path.read_text())
                 else:
-                    print(f"Warning: Rule file not found: {rule_path}", file=sys.stderr)
+                    console.print(f"[yellow]Warning: Rule file not found: {rule_path}[/yellow]")
 
         eval_generator = EvalConfigGenerator()
         eval_path = skill_path / "eval.yaml"
@@ -495,9 +498,10 @@ def main() -> int:
             rule_files=rule_contents,
         )
 
-        print(f"Created skill at: {skill_path}")
-        print(f"  - {skill_path / 'SKILL.md'}")
-        print(f"  - {eval_path}")
+        console.print(f"[bold green]✓ Skill Created[/bold green]")
+        console.print(f"  [dim]Location:[/dim] [cyan]{skill_path}[/cyan]")
+        console.print(f"  [dim]SKILL.md:[/dim]  [cyan]{skill_path / 'SKILL.md'}[/cyan]")
+        console.print(f"  [dim]eval.yaml:[/dim] [cyan]{eval_path}[/cyan]")
 
     elif args.command == "create":
         from skillforge import SkillCreatorAgent
@@ -507,11 +511,11 @@ def main() -> int:
         api_key = args.api_key or os.environ.get("LLM_API_KEY")
 
         if not base_url or not api_key:
-            print("Error: LLM configuration required.", file=sys.stderr)
-            print("Set environment variables:", file=sys.stderr)
-            print("  export LLM_BASE_URL=https://api.openai.com/v1", file=sys.stderr)
-            print("  export LLM_API_KEY=sk-xxx", file=sys.stderr)
-            print("Or use --base-url and --api-key options.", file=sys.stderr)
+            console.print("[red]Error: LLM configuration required.[/red]")
+            console.print("\n[dim]Set environment variables:[/dim]")
+            console.print("  [cyan]export LLM_BASE_URL=https://api.openai.com/v1[/cyan]")
+            console.print("  [cyan]export LLM_API_KEY=sk-xxx[/cyan]")
+            console.print("\n[dim]Or use --base-url and --api-key options.[/dim]")
             return 1
 
         agent = SkillCreatorAgent(
@@ -523,7 +527,7 @@ def main() -> int:
 
         if args.from_codebase:
             # Create from codebase analysis
-            print(f"Analyzing codebase at {args.from_codebase}...")
+            console.print(f"[dim]Analyzing codebase at[/dim] [cyan]{args.from_codebase}[/cyan][dim]...[/dim]")
 
             async def run_create():
                 return await agent.analyze_codebase_for_skill(
@@ -535,7 +539,7 @@ def main() -> int:
             skill_path = asyncio.run(run_create())
         else:
             # Create from description
-            print(f"Creating skill '{args.name}' using LLM...")
+            console.print(f"[dim]Creating skill[/dim] [green]{args.name}[/green] [dim]using LLM...[/dim]")
 
             async def run_create():
                 return await agent.create_skill(
@@ -549,11 +553,12 @@ def main() -> int:
 
             skill_path = asyncio.run(run_create())
 
-        print(f"\nSkill created at: {skill_path}")
+        console.print(f"\n[bold green]✓ Skill Created[/bold green]")
+        console.print(f"  [dim]Location:[/dim] [cyan]{skill_path}[/cyan]")
         if (skill_path / "SKILL.md").exists():
-            print(f"  - {skill_path / 'SKILL.md'}")
+            console.print(f"  [dim]SKILL.md:[/dim]  [cyan]{skill_path / 'SKILL.md'}[/cyan]")
         if (skill_path / "eval.yaml").exists():
-            print(f"  - {skill_path / 'eval.yaml'}")
+            console.print(f"  [dim]eval.yaml:[/dim] [cyan]{skill_path / 'eval.yaml'}[/cyan]")
 
     elif args.command == "improve":
         from skillforge import SkillCreatorAgent
@@ -562,7 +567,7 @@ def main() -> int:
         api_key = args.api_key or os.environ.get("LLM_API_KEY")
 
         if not base_url or not api_key:
-            print("Error: LLM configuration required.", file=sys.stderr)
+            console.print("[red]Error: LLM configuration required.[/red]")
             return 1
 
         agent = SkillCreatorAgent(
@@ -571,7 +576,7 @@ def main() -> int:
             model_name=args.model,
         )
 
-        print(f"Improving skill at {args.skill_dir}...")
+        console.print(f"[dim]Improving skill at[/dim] [cyan]{args.skill_dir}[/cyan][dim]...[/dim]")
 
         async def run_improve():
             return await agent.improve_skill(
@@ -580,7 +585,7 @@ def main() -> int:
             )
 
         skill_path = asyncio.run(run_improve())
-        print(f"Skill improved at: {skill_path}")
+        console.print(f"[bold green]✓ Skill improved at[/bold green] [cyan]{skill_path}[/cyan]")
 
     elif args.command == "eval":
         from .commands import run_eval
@@ -593,8 +598,8 @@ def main() -> int:
 
         # Validate skill_dir is provided for actual evaluation
         if args.skill_dir is None:
-            print("Error: skill_dir is required for evaluation", file=sys.stderr)
-            print("Use --list-metrics to see available metrics", file=sys.stderr)
+            console.print("[red]Error: skill_dir is required for evaluation[/red]")
+            console.print("[dim]Use --list-metrics to see available metrics[/dim]")
             return 1
 
         # Parse metrics if provided

@@ -64,6 +64,8 @@ async def run_smoke_eval(
     trials: int = 5,
     skill_paths: list[str] | None = None,
     debug_dir: str | None = None,
+    skill_name: str | None = None,
+    skill_summary: str | None = None,
 ) -> EvalReport:
     """Run a smoke evaluation for a single task.
 
@@ -73,6 +75,8 @@ async def run_smoke_eval(
         skill_paths: Optional list of skill paths to inject
         debug_dir: Optional directory to save grader prompts/responses for debugging.
                    Can also be set via SKILLGRADE_DEBUG_DIR environment variable.
+        skill_name: Optional skill name for grader context
+        skill_summary: Optional skill summary for grader context
 
     Returns:
         EvalReport with aggregated results
@@ -87,9 +91,13 @@ async def run_smoke_eval(
     initial_state: SmokeState = {
         "task_name": task["name"],
         "instruction": task["instruction"],
+        "expected": task.get("expected"),
+        "trigger": task.get("trigger", True),
         "workspace_config": task.get("workspace", []),
         "grader_configs": task.get("graders", []),
         "skill_paths": skill_paths or [],
+        "skill_name": skill_name,
+        "skill_summary": skill_summary,
         "agent_model": task.get("agent") or os.environ.get("LLM_MODEL_NAME", "gpt-4o"),
         "agent_timeout": task.get("timeout", 300),
         "llm_base_url": os.environ.get("LLM_BASE_URL", ""),

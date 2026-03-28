@@ -13,6 +13,7 @@ from ..types import (
     EvalReport,
     GraderConfig,
     GraderType,
+    SkillInfo,
     TaskConfig,
     TrialResult,
     WorkspaceFile,
@@ -91,19 +92,28 @@ def save_eval_config(config: EvalConfig | dict[str, Any], output_path: Path) -> 
     if hasattr(config, "to_dict"):
         config = config.to_dict()
 
-    # Remove unnecessary fields for saved config
-    if "defaults" in config:
-        config["defaults"].pop("docker", None)
-        config["defaults"].pop("environment", None)
-        config["defaults"].pop("provider", None)
-        # Don't write agent and grader_model - read from LLM_MODEL_NAME at runtime
-        config["defaults"].pop("agent", None)
-        config["defaults"].pop("grader_model", None)
+    # Clean up settings - remove runtime fields
+    if "settings" in config:
+        for runtime_field in ["docker", "environment", "provider", "agent", "grader_model"]:
+            config["settings"].pop(runtime_field, None)
 
-    # Remove grader model - read from LLM_MODEL_NAME at runtime
+    # Clean up tasks
     for task in config.get("tasks", []):
+        # Keep workspace field but ensure it's a list
+        if "workspace" not in task:
+            task["workspace"] = []
+
         for grader in task.get("graders", []):
             grader.pop("model", None)
+            # Remove null fields
+            keys_to_remove = [k for k, v in grader.items() if v is None]
+            for k in keys_to_remove:
+                del grader[k]
+
+        # Remove null fields from task (except workspace)
+        keys_to_remove = [k for k, v in task.items() if v is None and k != "workspace"]
+        for k in keys_to_remove:
+            del task[k]
 
     content = yaml.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
     output_path.write_text(content)
@@ -112,24 +122,45 @@ def save_eval_config(config: EvalConfig | dict[str, Any], output_path: Path) -> 
 
 
 def parse_eval_config(raw: dict[str, Any], base_dir: Path) -> EvalConfig:
-    """Parse raw configuration dictionary into EvalConfig."""
-    defaults = {**DEFAULT_CONFIG, **raw.get("defaults", {})}
+    """Parse raw configuration dictionary into EvalConfig.
+
+    Supports both new format (skill object, settings) and legacy format
+    (skill string, defaults, version).
+    """
+    # Parse skill info (support both new and legacy formats)
+    skill_info = None
+    skill_raw = raw.get("skill")
+    if skill_raw:
+        if isinstance(skill_raw, dict):
+            # New format: skill is an object with name and summary
+            skill_info = SkillInfo(
+                name=skill_raw.get("name", ""),
+                summary=skill_raw.get("summary"),
+            )
+        else:
+            # Legacy format: skill is a string
+            skill_info = SkillInfo(name=str(skill_raw))
+
+    # Parse settings (support both new 'settings' and legacy 'defaults')
+    settings = {**DEFAULT_CONFIG, **raw.get("settings", raw.get("defaults", {}))}
 
     tasks = []
     for task_raw in raw.get("tasks", []):
-        task = parse_task(task_raw, defaults, base_dir)
+        task = parse_task(task_raw, settings, base_dir)
         tasks.append(task)
 
     return EvalConfig(
-        version=raw.get("version", "1"),
-        skill=raw.get("skill"),
-        defaults=defaults,
+        skill=skill_info,
+        settings=settings,
         tasks=tasks,
     )
 
 
 def parse_task(task_raw: dict[str, Any], defaults: dict[str, Any], base_dir: Path) -> TaskConfig:
-    """Parse a single task configuration."""
+    """Parse a single task configuration.
+
+    Supports both new format (trigger, expected) and legacy format (expected_trigger).
+    """
     workspace = []
     for ws_raw in task_raw.get("workspace", []):
         ws = WorkspaceFile(
@@ -144,15 +175,23 @@ def parse_task(task_raw: dict[str, Any], defaults: dict[str, Any], base_dir: Pat
         grader = parse_grader(grader_raw, defaults, base_dir)
         graders.append(grader)
 
+    # Support both new 'trigger' and legacy 'expected_trigger' fields
+    trigger = task_raw.get("trigger", task_raw.get("expected_trigger", True))
+
+    # Parse expected field
+    expected = task_raw.get("expected")
+    if expected:
+        expected = resolve_file_or_inline(expected, base_dir)
+
     return TaskConfig(
         name=task_raw["name"],
         instruction=resolve_file_or_inline(task_raw["instruction"], base_dir),
+        expected=expected,
+        trigger=trigger,
         workspace=workspace,
         graders=graders,
         trials=task_raw.get("trials", defaults.get("trials", 5)),
         timeout=task_raw.get("timeout", defaults.get("timeout", 300)),
-        agent=task_raw.get("agent", defaults.get("agent")),
-        provider=task_raw.get("provider", defaults.get("provider")),
     )
 
 
@@ -206,8 +245,8 @@ def normalize_grader_weights(graders: list[dict[str, Any]]) -> list[dict[str, An
     """Normalize grader weights based on grader types.
 
     Rules:
-    - Only LLM rubric: weight = 1.0
-    - LLM rubric + deterministic: LLM = 0.8, deterministic = 0.2 (split among rules)
+    - Only LLM: weight = 1.0
+    - LLM + deterministic: LLM = 0.8, deterministic = 0.2 (split among rules)
 
     Args:
         graders: List of grader configurations
@@ -223,14 +262,14 @@ def normalize_grader_weights(graders: list[dict[str, Any]]) -> list[dict[str, An
     if has_explicit_weights:
         return graders
 
-    has_llm = any(g.get("type") == "llm_rubric" for g in graders)
+    has_llm = any(g.get("type") == "llm" for g in graders)
     has_det = any(g.get("type") == "deterministic" for g in graders)
     det_count = sum(1 for g in graders if g.get("type") == "deterministic")
 
     if has_llm and has_det:
         # LLM + deterministic: 0.8 / 0.2
         for g in graders:
-            if g.get("type") == "llm_rubric":
+            if g.get("type") == "llm":
                 g["weight"] = 0.8
             else:
                 g["weight"] = round(0.2 / det_count, 2)
@@ -375,31 +414,28 @@ def generate_eval_plan(
     skill_dir: Path,
     model: str | None = None,
     include_skill_md_in_rubric: bool = False,
-    num_positive: int = 3,
-    num_negative: int = 2,
-    num_evolved: int = 2,
+    parallel: int = 4,
+    # Removed fixed count parameters - now uses smart planning
 ) -> EvalConfig:
-    """Generate evaluation plan using LLM.
+    """Generate evaluation plan using intelligent test planning.
+
+    Analyzes skill complexity and automatically determines appropriate
+    number and distribution of test cases.
 
     Args:
         skill_dir: Path to the skill directory
         model: Optional LLM model name for grading
         include_skill_md_in_rubric: Whether to include SKILL.md content in rubric.
-        num_positive: Number of positive test cases
-        num_negative: Number of negative test cases
-        num_evolved: Number of evolved test cases
+        parallel: Number of parallel threads for generation (default: 4)
 
     Returns:
-        EvalConfig with test cases
+        EvalConfig with intelligently planned test cases
     """
-    from .generator import EvalPlanGenerator
+    from .generator import generate_eval_plan as smart_generate
 
-    generator = EvalPlanGenerator(
+    return smart_generate(
+        skill_dir=skill_dir,
         model=model,
         include_skill_md_in_rubric=include_skill_md_in_rubric,
-        num_positive=num_positive,
-        num_negative=num_negative,
-        num_evolved=num_evolved,
+        parallel=parallel,
     )
-    return generator.generate(skill_dir)
-    return generator.generate(skill_dir)

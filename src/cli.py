@@ -590,26 +590,22 @@ def _generate_eval_yaml(skill_md: Path, eval_path: Path, args) -> None:
     """Generate eval.yaml from skill analysis."""
     from skillgrade.core.config import save_eval_config
     from skillgrade.core.generator import generate_eval_plan
-    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
     skill_dir = skill_md.parent
     include_skill_md = getattr(args, "include_skill_md", False)
+    parallel = getattr(args, "parallel", 4)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[cyan]{task.description}[/cyan]"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"Analyzing skill at {skill_dir}...", total=None)
-        config = generate_eval_plan(
-            skill_dir,
-            include_skill_md_in_rubric=include_skill_md,
-        )
-        save_eval_config(config, eval_path)
-        progress.update(task, completed=True)
+    console.print(f"[green]Analyzing skill at [/green][cyan]{skill_dir}[/cyan] [green]...[/green]")
 
-    console.print(f"[dim]Generated[/dim] [green]{len(config.tasks)}[/green] [dim]test tasks[/dim]")
+    config = generate_eval_plan(
+        skill_dir,
+        include_skill_md_in_rubric=include_skill_md,
+        parallel=parallel,
+    )
+    save_eval_config(config, eval_path)
+
+    console.print()
+    console.print(f"[green]✓[/green] Saved [cyan]{len(config.tasks)}[/cyan] tasks to [cyan]{eval_path}[/cyan]")
 
 
 def handle_evolve(args) -> int:

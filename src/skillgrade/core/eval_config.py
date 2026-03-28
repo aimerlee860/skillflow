@@ -38,7 +38,7 @@ class EvalConfigGenerator:
         has_rules = rule_files and len(rule_files) > 0
         llm_weight = 0.8 if has_rules else 1.0
 
-        # LLM rubric grader (always included)
+        # LLM rubric grader (always included) - use new 'llm' type
         graders = [self._build_llm_grader(llm_weight)]
 
         # Add deterministic graders from rule files
@@ -55,9 +55,9 @@ class EvalConfigGenerator:
         )
 
     def _build_llm_grader(self, weight: float) -> dict[str, Any]:
-        """Build LLM rubric grader configuration."""
+        """Build LLM rubric grader configuration (uses 'llm' type for new format)."""
         return {
-            "type": "llm_rubric",
+            "type": "llm",  # 使用新的 llm 类型
             "weight": weight,
             "rubric": """# Evaluation Rubric
 Evaluate the agent's performance on this task:

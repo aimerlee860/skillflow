@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from rich.console import Console
 
 from .base import BaseGrader
 from ..llm.client import LLMClient
 from ..types import GraderConfig, GraderResult
+
+console = Console()
 
 
 class LLMGrader(BaseGrader):
@@ -50,6 +53,11 @@ class LLMGrader(BaseGrader):
         workspace: Path | str,
         config: GraderConfig,
         logs: list[dict[str, Any]],
+        instruction: str | None = None,
+        expected: str | None = None,
+        expected_trigger: bool = True,
+        skill_name: str | None = None,
+        skill_summary: str | None = None,
     ) -> GraderResult:
         """Evaluate the agent using LLM-based rubric.
 
@@ -57,20 +65,31 @@ class LLMGrader(BaseGrader):
             workspace: Path to the workspace directory
             config: Grader configuration with rubric
             logs: Execution logs from the agent
+            instruction: User input (task instruction)
+            expected: Expected output
+            expected_trigger: Whether skill should be triggered
+            skill_name: Skill name
+            skill_summary: Skill summary/description
 
         Returns:
             GraderResult with score and reasoning
         """
-        if not config.rubric:
-            return GraderResult(
-                grader_type="llm_rubric",
-                score=0.0,
-                weight=config.weight,
-                details="No rubric configured",
-            )
+        # Extract real results from logs
+        actual_triggered = self._extract_actual_triggered(logs)
+        actual_output = self._extract_actual_output(logs)
 
         session_transcript = self._build_transcript(logs)
-        prompt = self._build_prompt(config.rubric, session_transcript)
+        prompt = self._build_prompt(
+            config=config,
+            session_transcript=session_transcript,
+            actual_triggered=actual_triggered,
+            actual_output=actual_output,
+            instruction=instruction,
+            expected=expected,
+            expected_trigger=expected_trigger,
+            skill_name=skill_name,
+            skill_summary=skill_summary,
+        )
 
         # 生成调试文件名
         timestamp = int(time.time() * 1000)
@@ -124,6 +143,44 @@ class LLMGrader(BaseGrader):
                 weight=config.weight,
                 details=f"LLM grading error: {str(e)}",
             )
+
+    def _extract_actual_triggered(self, logs: list[dict[str, Any]]) -> bool:
+        """Extract actual trigger status from logs.
+
+        Checks if SKILL.md was accessed (skill triggered).
+
+        Args:
+            logs: List of log entries
+
+        Returns:
+            True if skill was triggered, False otherwise
+        """
+        for log in logs:
+            if log.get("type") == "skill_tracking":
+                data = log.get("data", {})
+                activation_status = data.get("activationStatus", "")
+                # ACCESSED = SKILL.md was read
+                # DEEP_USAGE = deep usage of references/scripts
+                if activation_status in ("accessed", "deep_usage"):
+                    return True
+        return False
+
+    def _extract_actual_output(self, logs: list[dict[str, Any]]) -> str:
+        """Extract actual output from agent execution logs.
+
+        Args:
+            logs: List of log entries
+
+        Returns:
+            Agent's final output string
+        """
+        for log in logs:
+            if log.get("type") == "agent_result":
+                data = log.get("data", {})
+                output = data.get("output", "")
+                if output:
+                    return output
+        return ""
 
     def _extract_task_name(self, logs: list[dict[str, Any]]) -> str | None:
         """从日志中提取任务名称。"""
@@ -210,7 +267,7 @@ class LLMGrader(BaseGrader):
 
         except Exception as e:
             # 调试保存失败不应影响正常流程
-            print(f"Warning: Failed to save debug info: {e}")
+            console.print(f"[yellow]Warning: Failed to save debug info: {e}[/yellow]")
 
     def _parse_response(self, content: str) -> tuple[float, str]:
         """Parse JSON response from LLM.
@@ -343,23 +400,55 @@ class LLMGrader(BaseGrader):
 
         return "\n".join(lines)
 
-    def _build_prompt(self, rubric: str, transcript: str) -> str:
-        """Build the grading prompt.
+    def _build_prompt(
+        self,
+        config: GraderConfig,
+        session_transcript: str,
+        actual_triggered: bool,
+        actual_output: str,
+        instruction: str | None = None,
+        expected: str | None = None,
+        expected_trigger: bool = True,
+        skill_name: str | None = None,
+        skill_summary: str | None = None,
+    ) -> str:
+        """Build the grading prompt using unified template.
+
+        使用统一模板拼接所有信息生成完整评估 prompt。
 
         Args:
-            rubric: The evaluation rubric
-            transcript: Session transcript
+            config: Grader configuration with rubric
+            session_transcript: Session transcript
+            actual_triggered: Whether the skill was actually triggered
+            actual_output: Agent's actual output
+            instruction: User input (task instruction)
+            expected: Expected output
+            expected_trigger: Whether skill should be triggered
+            skill_name: Skill name
+            skill_summary: Skill summary/description
 
         Returns:
             Complete prompt for the LLM
         """
+        # Build unified evaluation rubric with real results
+        rubric = self._build_unified_rubric(
+            config=config,
+            actual_triggered=actual_triggered,
+            actual_output=actual_output,
+            instruction=instruction,
+            expected=expected,
+            expected_trigger=expected_trigger,
+            skill_name=skill_name,
+            skill_summary=skill_summary,
+        )
+
         return f"""You are evaluating an AI agent's performance based on a rubric.
 
 ## RUBRIC
 {rubric}
 
 ## SESSION TRANSCRIPT
-{transcript}
+{session_transcript}
 
 ## INSTRUCTIONS
 1. Carefully review the session transcript above
@@ -375,3 +464,102 @@ Provide your evaluation as a JSON object with:
 - "score": A number between 0.0 and 1.0
 - "reasoning": Detailed explanation of the score
 """
+
+    def _build_unified_rubric(
+        self,
+        config: GraderConfig,
+        actual_triggered: bool,
+        actual_output: str,
+        instruction: str | None = None,
+        expected: str | None = None,
+        expected_trigger: bool = True,
+        skill_name: str | None = None,
+        skill_summary: str | None = None,
+    ) -> str:
+        """Build unified evaluation rubric from task context.
+
+        从参数传递的 task context 构建统一评估标准，
+        同时包含真实触发状态和真实答案。
+
+        Args:
+            config: Grader configuration with rubric
+            actual_triggered: Whether the skill was actually triggered
+            actual_output: Agent's actual output
+            instruction: User input (task instruction)
+            expected: Expected output
+            expected_trigger: Whether skill should be triggered
+            skill_name: Skill name
+            skill_summary: Skill summary/description
+
+        Returns:
+            Complete evaluation rubric string
+        """
+        # 触发状态描述
+        trigger_expected_desc = "应该触发" if expected_trigger else "不应该触发"
+        trigger_actual_desc = "已触发" if actual_triggered else "未触发"
+
+        # 构建统一评估标准
+        rubric = f"""# 评估标准
+
+## 基本信息
+- **技能名称**: {skill_name or "未知技能"}
+
+## 技能摘要
+{skill_summary if skill_summary else "无"}
+
+## 用户输入
+{instruction or ""}
+
+## 触发状态
+
+| 项目 | 状态 |
+|------|------|
+| **期望触发** | {trigger_expected_desc} |
+| **实际触发** | {trigger_actual_desc} |
+
+## 期望输出
+{expected if expected else "无"}
+
+## 真实输出（Agent 执行结果）
+{actual_output if actual_output else "（无输出）"}
+
+## 评估标准
+
+### 1. 核心信息匹配 (60%)
+- 关键数据是否正确（如金额、账号、日期、姓名等）
+- 主要结论是否一致
+- 核心操作是否完成
+
+### 2. 格式正确性 (20%)
+- 输出格式是否符合技能定义要求
+- 是否包含所有必要字段
+- 结构是否清晰
+
+### 3. 完整性 (20%)
+- 是否遗漏重要信息
+- 是否有多余内容
+- 逻辑是否连贯
+
+## 评分指南
+
+| 分数范围 | 说明 |
+|----------|------|
+| **1.0** | 完全匹配 - 核心信息准确，格式正确，内容完整 |
+| **0.7-0.9** | 良好 - 核心信息正确，格式或细节有小差异 |
+| **0.4-0.6** | 部分匹配 - 有一些错误或遗漏，但核心信息基本正确 |
+| **0.0-0.3** | 严重不匹配 - 核心信息错误或缺失 |
+
+## 输出要求
+
+以 JSON 格式输出评分结果：
+{{"score": 0.0-1.0, "reasoning": "评分理由"}}
+"""
+        # 如果有特例化的评估细节（大模型生成的特殊评估要求），追加到评估标准中
+        if config.rubric:
+            rubric += f"""
+
+## 特例化评估细则
+
+{config.rubric}
+"""
+        return rubric

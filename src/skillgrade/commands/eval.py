@@ -248,6 +248,7 @@ async def run_eval(
             skill_name=skill_name,
             model_name=model_name,
             parallel=parallel,
+            json_output=json_output,
         )
 
         if json_output:

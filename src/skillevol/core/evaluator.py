@@ -21,7 +21,19 @@ class Evaluator:
         result = shutil.which(self.config.skillgrade_cmd)
         return result is not None
 
-    async def evaluate(self, skill_md_content: str) -> EvalResult:
+    async def evaluate(
+        self, skill_md_content: str, progress_callback=None
+    ) -> EvalResult:
+        """Evaluate a skill and return results.
+
+        Args:
+            skill_md_content: The SKILL.md content to evaluate
+            progress_callback: Optional async callback for progress updates
+                             Signature: async def callback(current: int, total: int, message: str)
+
+        Returns:
+            EvalResult with evaluation metrics
+        """
         if not self._skillgrade_available:
             raise RuntimeError("skillgrade not found. Please install skillgrade or provide path.")
 
@@ -52,7 +64,9 @@ class Evaluator:
             start_time = time.time()
             try:
                 result = await asyncio.wait_for(
-                    self._run_skillgrade(workspace, skip_init=has_eval_config),
+                    self._run_skillgrade(
+                        workspace, skip_init=has_eval_config, progress_callback=progress_callback
+                    ),
                     # Allow generous timeout: each task can have its own timeout,
                     # but we need an overall limit to prevent hanging indefinitely.
                     # Default: num_tasks * task_timeout * trials + buffer
@@ -73,7 +87,17 @@ class Evaluator:
 
         return self._parse_output(result, duration)
 
-    async def _run_skillgrade(self, workspace: Path, skip_init: bool = False) -> str:
+    async def _run_skillgrade(
+        self, workspace: Path, skip_init: bool = False, progress_callback=None
+    ) -> str:
+        """Run skillgrade eval and optionally report progress via callback.
+
+        Args:
+            workspace: Path to workspace directory
+            skip_init: Whether to skip eval.yaml generation
+            progress_callback: Optional async callback for progress updates
+                             Signature: async def callback(current: int, total: int, message: str)
+        """
         cmd = [
             self.config.skillgrade_cmd,
             "eval",
@@ -97,12 +121,54 @@ class Evaluator:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+
+        # Read stderr in real-time for progress updates
+        import re
+
+        stdout_data = b""
+        stderr_data = b""
+
+        async def read_stderr():
+            """Read stderr and parse progress messages."""
+            nonlocal stderr_data
+            pattern = re.compile(r"PROGRESS:\s*(\d+)/(\d+)\s+tasks?\s+completed")
+            buffer = ""
+            while True:
+                chunk = await process.stderr.read(1024)
+                if not chunk:
+                    break
+                stderr_data += chunk
+                buffer += chunk.decode("utf-8", errors="replace")
+
+                # Parse progress messages
+                for line in buffer.split("\n"):
+                    match = pattern.search(line)
+                    if match and progress_callback:
+                        current = int(match.group(1))
+                        total = int(match.group(2))
+                        await progress_callback(current, total, f"Task {current}/{total}")
+
+                # Keep incomplete line in buffer
+                if "\n" in buffer:
+                    buffer = buffer.rsplit("\n", 1)[1]
+
+        # Read stdout
+        async def read_stdout():
+            nonlocal stdout_data
+            while True:
+                chunk = await process.stdout.read(4096)
+                if not chunk:
+                    break
+                stdout_data += chunk
+
+        # Run both readers concurrently
+        await asyncio.gather(read_stdout(), read_stderr())
+        await process.wait()
 
         if process.returncode != 0:
-            return f"ERROR: {stderr.decode()}\n{stdout.decode()}"
+            return f"ERROR: {stderr_data.decode()}\n{stdout_data.decode()}"
 
-        return stdout.decode()
+        return stdout_data.decode()
 
     def _parse_output(self, output: str, duration: float) -> EvalResult:
         """Parse evaluation output and extract all metrics."""

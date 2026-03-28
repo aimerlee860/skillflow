@@ -11,8 +11,33 @@ class GraderType(str, Enum):
     """Types of graders supported by skillgrade."""
 
     DETERMINISTIC = "deterministic"
-    LLM_RUBRIC = "llm_rubric"
-    TRIGGER = "trigger"  # 基于技能追踪数据的触发判定评估器
+    LLM = "llm"
+    TRIGGER = "trigger"
+
+
+class DifficultyLevel(str, Enum):
+    """Test case difficulty levels."""
+
+    EASY = "easy"      # 信息完整，可直接执行
+    MEDIUM = "medium"  # 部分信息缺失，需要推理或追问
+    HARD = "hard"      # 关键信息严重缺失，表达模糊
+
+
+class ComplexityLevel(str, Enum):
+    """Skill complexity levels for test planning."""
+
+    SIMPLE = "simple"      # 预期 6-8 测试
+    MODERATE = "moderate"  # 预期 10-14 测试
+    COMPLEX = "complex"    # 预期 16-20 测试
+
+
+class TestType(str, Enum):
+    """Test case types."""
+
+    POSITIVE = "positive"  # 正向测试：应该触发技能
+    NEGATIVE = "negative"  # 负向测试：不应该触发技能
+    EVOLVED = "evolved"    # 演化测试：正向用例的变体
+    BOUNDARY = "boundary"  # 边界测试：边缘条件
 
 
 # =============================================================================
@@ -54,6 +79,100 @@ class SkillExample:
     name: str
     input: str
     expected_output: str | None = None
+
+
+# =============================================================================
+# Skill Understanding Types
+# =============================================================================
+
+
+@dataclass
+class FunctionSpec:
+    """技能核心功能规格"""
+
+    name: str
+    weight: float = 1.0  # 重要性权重 (0.0-1.0)
+    input_fields: list[str] = field(default_factory=list)
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "weight": self.weight,
+            "inputFields": self.input_fields,
+            "description": self.description,
+        }
+
+
+@dataclass
+class SkillProfile:
+    """技能分析结果 - 用于测试规划"""
+
+    complexity: ComplexityLevel
+    complexity_factors: dict[str, float] = field(default_factory=dict)
+    core_functions: list[FunctionSpec] = field(default_factory=list)
+    boundary_types: list[str] = field(default_factory=list)
+    recommended_total: int = 10
+    type_weights: dict[str, float] = field(default_factory=dict)
+    summary: str | None = None  # LLM 生成的技能摘要 (500-600字)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "complexity": self.complexity.value,
+            "complexityFactors": self.complexity_factors,
+            "coreFunctions": [f.to_dict() for f in self.core_functions],
+            "boundaryTypes": self.boundary_types,
+            "recommendedTotal": self.recommended_total,
+            "typeWeights": self.type_weights,
+        }
+        if self.summary:
+            result["summary"] = self.summary
+        return result
+
+
+# =============================================================================
+# Test Planning Types
+# =============================================================================
+
+
+@dataclass
+class TestCaseSpec:
+    """测试用例规格说明"""
+
+    id: str
+    test_type: TestType
+    target_function: str | None = None
+    difficulty_target: DifficultyLevel = DifficultyLevel.MEDIUM
+    boundary_type: str | None = None
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "testType": self.test_type.value,
+            "targetFunction": self.target_function,
+            "difficultyTarget": self.difficulty_target.value,
+            "boundaryType": self.boundary_type,
+            "description": self.description,
+        }
+
+
+@dataclass
+class TestPlan:
+    """测试计划"""
+
+    total_count: int
+    cases: list[TestCaseSpec] = field(default_factory=list)
+    type_distribution: dict[TestType, int] = field(default_factory=dict)
+    difficulty_distribution: dict[DifficultyLevel, int] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "totalCount": self.total_count,
+            "cases": [c.to_dict() for c in self.cases],
+            "typeDistribution": {k.value: v for k, v in self.type_distribution.items()},
+            "difficultyDistribution": {k.value: v for k, v in self.difficulty_distribution.items()},
+        }
 
 
 @dataclass
@@ -126,12 +245,27 @@ class CommandResult:
 
 
 @dataclass
+class SkillInfo:
+    """Skill metadata for eval configuration."""
+
+    name: str
+    summary: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        result: dict[str, Any] = {"name": self.name}
+        if self.summary:
+            result["summary"] = self.summary
+        return result
+
+
+@dataclass
 class GraderConfig:
     """Configuration for a single grader."""
 
     type: GraderType
     run: str | None = None
-    rubric: str | None = None
+    rubric: str | None = None  # 大模型生成的特殊评估要求，如果没有则为 None
     weight: float = 1.0
     model: str | None = None
     setup: str | None = None
@@ -392,41 +526,45 @@ class TaskConfig:
     name: str
     instruction: str
     expected: str | None = None  # 期望结果（用于输出对比）
-    expected_trigger: bool = True  # 是否应该触发技能
+    trigger: bool = True  # 是否应该触发技能
     workspace: list[WorkspaceFile] = field(default_factory=list)
     graders: list[GraderConfig] = field(default_factory=list)
     trials: int = 5
     timeout: int = 300
-    agent: str | None = None
-    provider: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for LangGraph serialization."""
+        """Convert to dictionary for serialization."""
+        graders_list = []
+        for g in self.graders:
+            grader_dict = {
+                "type": g.type.value,
+                "weight": g.weight,
+            }
+            if g.run is not None:
+                grader_dict["run"] = g.run
+            # 对于 LLM 类型的 grader，始终输出 rubric 字段（即使为 None）
+            if g.type == GraderType.LLM:
+                grader_dict["rubric"] = g.rubric
+            elif g.rubric is not None:
+                grader_dict["rubric"] = g.rubric
+            if g.model is not None:
+                grader_dict["model"] = g.model
+            if g.setup is not None:
+                grader_dict["setup"] = g.setup
+            if g.expected_trigger is not None:
+                grader_dict["expectedTrigger"] = g.expected_trigger
+            graders_list.append(grader_dict)
+
         result = {
             "name": self.name,
             "instruction": self.instruction,
             "expected": self.expected,
-            "expectedTrigger": self.expected_trigger,
+            "trigger": self.trigger,
             "workspace": [{"src": w.src, "dest": w.dest, "chmod": w.chmod} for w in self.workspace],
-            "graders": [
-                {
-                    "type": g.type.value,
-                    "run": g.run,
-                    "rubric": g.rubric,
-                    "weight": g.weight,
-                    "model": g.model,
-                    "setup": g.setup,
-                    "expectedTrigger": g.expected_trigger,
-                }
-                for g in self.graders
-            ],
+            "graders": graders_list,
             "trials": self.trials,
             "timeout": self.timeout,
         }
-        if self.agent:
-            result["agent"] = self.agent
-        if self.provider:
-            result["provider"] = self.provider
         return result
 
 
@@ -434,19 +572,18 @@ class TaskConfig:
 class EvalConfig:
     """Top-level evaluation configuration."""
 
-    version: str = "1"
-    skill: str | None = None
-    defaults: dict[str, Any] = field(default_factory=dict)
+    skill: SkillInfo | None = None
+    settings: dict[str, Any] = field(default_factory=dict)
     tasks: list[TaskConfig] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
-            "version": self.version,
-            "skill": self.skill,
-            "defaults": self.defaults,
-            "tasks": [t.to_dict() for t in self.tasks],
-        }
+        result: dict[str, Any] = {}
+        if self.skill:
+            result["skill"] = self.skill.to_dict()
+        result["settings"] = self.settings
+        result["tasks"] = [t.to_dict() for t in self.tasks]
+        return result
 
 
 @dataclass
