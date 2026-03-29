@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Optional
 
 from deepagents import create_deep_agent
-from langchain_core.messages import HumanMessage, SystemMessage
+from deepagents.backends import FilesystemBackend
+from langchain_core.messages import HumanMessage
 from rich.console import Console
 
 from skillgrade.llm.client import LLMClient
-from skillgrade.tools import shell, read_file, write_file, glob_files
+from skillgrade.tools import shell
+from prompts import PromptManager
 
 console = Console()
 
@@ -20,8 +21,9 @@ console = Console()
 class SkillCreatorAgent:
     """Agent that uses the skill-creator skill to generate new skills.
 
-    This agent loads the skill-creator skill as system context and uses
-    ReAct pattern to interactively create high-quality skills.
+    Uses deepagents' progressive skill loading and FilesystemMiddleware
+    for all file operations (read_file, write_file, edit_file, glob, grep, ls).
+    The shell tool is provided by skillgrade for real filesystem commands.
     """
 
     def __init__(
@@ -29,7 +31,8 @@ class SkillCreatorAgent:
         model_name: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        max_iterations: int = 50,
+        max_iterations: int = 100,
+        skill_paths: list[str] | None = None,
     ):
         """Initialize the Skill Creator Agent.
 
@@ -38,6 +41,7 @@ class SkillCreatorAgent:
             base_url: Override base URL for API
             api_key: Override API key
             max_iterations: Maximum number of agent iterations
+            skill_paths: Optional list of skill directory paths for progressive loading
         """
         self.llm_client = LLMClient(
             base_url=base_url,
@@ -46,56 +50,48 @@ class SkillCreatorAgent:
         )
         self.max_iterations = max_iterations
         self.model_name = self.llm_client.model_name
+        self.skill_paths = skill_paths or []
 
-        # Load the skill-creator skill
-        self._skill_creator_content = self._load_skill_creator()
+        # Only shell from skillgrade — all file ops handled by FilesystemMiddleware
+        self.tools = [shell]
 
-        # Available tools for skill creation
-        self.tools = [shell, read_file, write_file, glob_files]
-
-        # Build system prompt from skill-creator
+        # Build simplified system prompt (skill-creator loaded via deepagents)
         self.system_prompt = self._build_system_prompt()
 
-        # Create the deep agent with skill-creator context
+        # Set up FilesystemBackend for progressive skill loading.
+        # Rooted at home so both the bundled skill-creator and user skill paths
+        # are accessible as virtual paths.
+        skill_source_paths = []
+
+        # Always include the skill-creator skill for progressive loading
+        skillforge_dir = Path(__file__).resolve().parent
+        skill_source_paths.append(
+            f"/{skillforge_dir.relative_to(Path.home())}/skills/skill-creator/"
+        )
+
+        # Add user-provided skill paths
+        for sp in self.skill_paths:
+            sp_resolved = Path(sp).expanduser().resolve()
+            if sp_resolved.exists():
+                skill_source_paths.append(f"/{sp_resolved.relative_to(Path.home())}/")
+
+        backend = FilesystemBackend(
+            root_dir=str(Path.home()),
+            virtual_mode=True,
+        )
+
+        # Create the deep agent — skill-creator is loaded progressively
         self.graph = create_deep_agent(
             model=self.llm_client.chat,
             tools=self.tools,
             system_prompt=self.system_prompt,
-        )
-
-    def _load_skill_creator(self) -> str:
-        """Load the skill-creator SKILL.md content."""
-        skill_path = Path(__file__).parent / "skills" / "skill-creator" / "SKILL.md"
-        if skill_path.exists():
-            return skill_path.read_text()
-        raise FileNotFoundError(
-            f"skill-creator skill not found at {skill_path}. "
-            "Please ensure the skill is installed."
+            skills=skill_source_paths,
+            backend=backend,
         )
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt from skill-creator skill content."""
-        # Extract the body (after frontmatter)
-        content = self._skill_creator_content
-        if content.startswith("---"):
-            match = re.match(r"^---\n.*?---\n", content, re.DOTALL)
-            if match:
-                content = content[match.end() :]
-
-        return f"""You are a Skill Creator Agent. Your job is to help users create high-quality AI agent skills.
-
-Follow these instructions from the skill-creator skill:
-
-{content}
-
----
-Remember:
-1. Always create SKILL.md with proper YAML frontmatter (name, description)
-2. The description is the PRIMARY triggering mechanism - include what the skill does AND when to use it
-3. Keep SKILL.md under 500 lines; use references/ for detailed content
-4. Follow the progressive disclosure pattern
-5. Create test cases and iterate based on feedback
-"""
+        """Build system prompt — skill-creator is loaded via deepagents progressive loading."""
+        return PromptManager.get("skillforge/creator_system")
 
     async def create_skill(
         self,
@@ -105,6 +101,7 @@ Remember:
         context: Optional[str] = None,
         examples: Optional[list[str]] = None,
         template: str = "default",
+        timeout: int = 300,
     ) -> Path:
         """Create a new skill using the skill-creator guidance.
 
@@ -115,6 +112,7 @@ Remember:
             context: Additional context (code snippets, docs, etc.)
             examples: Example use cases for the skill
             template: Template variant to use (default, code-review, etc.)
+            timeout: Maximum seconds to wait for creation (default 300)
 
         Returns:
             Path to the created skill directory
@@ -153,11 +151,9 @@ Remember:
 
         prompt_parts.extend([
             f"",
-            f"**IMPORTANT - Language Requirement**:",
+            f"**Language Requirement**:",
             f"Detect the language used in the description and examples above.",
             f"Write ALL content (SKILL.md, comments, documentation) in the SAME language as the input.",
-            f"If the description is in Chinese, write everything in Chinese.",
-            f"If the description is in English, write everything in English.",
             f"",
             f"Please follow the skill-creator process:",
             f"1. Understand the intent and ask clarifying questions if needed",
@@ -168,7 +164,11 @@ Remember:
         ])
 
         prompt = "\n".join(prompt_parts)
-        prompt += "\n\n**IMPORTANT**: After creating ALL files (SKILL.md and any references/scripts), create an empty file named '_DONE' in the skill directory to signal completion. Do NOT respond before creating _DONE."
+        prompt += (
+            f"\n\n**IMPORTANT**:"
+            f"\n- The optimization iteration loop (draft → test → evaluate → improve) must NOT exceed 20 iterations. Stop improving after 20 iterations even if results can still be improved."
+            f"\n- After creating ALL files, create an empty file named '_DONE' in {skill_path} to signal completion. Do NOT respond before creating _DONE."
+        )
 
         # Run the agent with astream to monitor _DONE file
         import asyncio
@@ -191,10 +191,10 @@ Remember:
 
         timeout_occurred = False
         try:
-            await asyncio.wait_for(run_with_early_exit(), timeout=180)
+            await asyncio.wait_for(run_with_early_exit(), timeout=timeout)
         except asyncio.TimeoutError:
             timeout_occurred = True
-            console.print("[yellow]Warning: Skill creation timed out after 180 seconds[/yellow]")
+            console.print(f"[yellow]Warning: Skill creation timed out after {timeout} seconds[/yellow]")
         except Exception as e:
             console.print(f"[red]Error during skill creation: {e}[/red]")
         finally:

@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from prompts import PromptManager
+
 from skillevol.core.llm import LLMClient
 from skillevol.core.types import EvalConfig, EvalResult, ExplorerConfig, OperatorType
 from skillevol.operators.base import BaseOperator
@@ -323,25 +325,13 @@ class Explorer:
             self._summarize_result(current_result) if current_result else "No baseline yet"
         )
 
-        prompt = f"""Based on the following information, propose ONE improvement to the SKILL.md file.
-
-## Current SKILL.md
-```markdown
-{skill_md}
-```
-
-## Current Evaluation Result
-{result_summary}
-
-## History Summary
-{history_summary}
-
-## Program Instructions
-{self.program_md}
-
-Please output ONLY the improved SKILL.md content. Do not include any explanations or comments.
-Start your response with the full SKILL.md content.
-"""
+        prompt = PromptManager.get(
+            "skillevol/autonomous_exploration",
+            skill_md=skill_md,
+            result_summary=result_summary,
+            history_summary=history_summary,
+            program_md=self.program_md,
+        )
 
         new_skill_md = self.llm.generate(prompt)
         new_skill_md = self._clean_output(new_skill_md)
@@ -391,13 +381,4 @@ Duration: {result.duration_seconds:.1f}s
         return output.strip()
 
     def _default_program(self) -> str:
-        return """You are optimizing a skill for AI agents. The goal is to maximize the combined score
-(pass_rate × (1 + pass_at_k) / 2).
-
-Focus on:
-1. Clear task instructions
-2. Good examples
-3. Specific constraints
-4. Edge case handling
-
-Propose ONE improvement at a time. Be conservative - small improvements compound."""
+        return PromptManager.get_raw("skillevol/default_program")

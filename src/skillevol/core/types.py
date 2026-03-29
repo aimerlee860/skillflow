@@ -145,6 +145,7 @@ class EvalConfig:
     threshold: float = 0.5
     skillgrade_cmd: str = "skillflow"  # Use unified skillflow CLI
     parallel: int = 1  # Number of tasks to evaluate in parallel
+    skills_path: str | None = None  # Path to skills directory for deepagents
 
 
 @dataclass

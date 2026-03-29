@@ -15,6 +15,7 @@ from ..llm.client import LLMClient
 from ..tools import shell
 from ..core.skill_tracking import SkillTracker
 from ..middleware.skill_tracking import SkillTrackingMiddleware
+from prompts import PromptManager
 
 # Note: We don't import read_file, write_file, glob_files here because
 # deepagents' FilesystemMiddleware provides these tools with proper
@@ -77,15 +78,7 @@ class DeepAgent(BaseAgent):
         self._chat_model = self.llm_client.chat
 
         # Custom system prompt for skillgrade context
-        self._custom_system_prompt = """You are a skill-enabled agent that helps users accomplish tasks.
-You have access to skills that provide specialized capabilities.
-
-When the user's request matches a skill's description:
-1. Read the skill's SKILL.md file using the read_file tool
-2. Follow the skill's instructions
-3. Use any helper scripts or references with absolute paths
-
-Be concise and direct. Complete tasks fully without stopping partway."""
+        self._custom_system_prompt = PromptManager.get_raw("skillgrade/agent_system")
 
         # Available tools
         # Note: File tools (read_file, write_file, glob, grep, ls) are provided by
@@ -115,7 +108,6 @@ Be concise and direct. Complete tasks fully without stopping partway."""
         # We need to provide virtual paths relative to the workspace root
         skill_source_paths = [
             "/.agents/skills/",
-            "/.claude/skills/",
         ]
 
         # Create filesystem backend for skill loading

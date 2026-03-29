@@ -44,6 +44,7 @@ async def run_evolve(
     keep_workspace: bool = False,
     verbose: bool = False,
     parallel: int = 1,
+    skills_path: Optional[str] = None,
 ) -> None:
     """Run skill evolution.
 
@@ -61,6 +62,7 @@ async def run_evolve(
         keep_workspace: Keep workspaces after completion
         verbose: Verbose output
         parallel: Number of tasks to evaluate in parallel
+        skills_path: Optional path to skills directory for deepagents
     """
     skill_file = skill_path / "SKILL.md"
     if not skill_file.exists():
@@ -105,6 +107,7 @@ async def run_evolve(
         eval_config_path=eval_config_path if eval_config_path and eval_config_path.exists() else None,
         trials=trials,
         parallel=parallel,
+        skills_path=skills_path,
     )
     explorer_config = ExplorerConfig(
         strategy=strategy,
@@ -214,9 +217,10 @@ async def run_evolve(
             # Save evaluation result alongside the skill
             _save_eval_summary(skill_version_dir, new_result, op_type, changes_summary, keep)
 
+            compare_score = state.baseline_score if mode == "steady" else state.best_score
             if keep:
                 console.print(
-                    f"\n[green]✓ Improved![/green] {new_result.combined_score:.3f} > {state.best_score:.3f}"
+                    f"\n[green]✓ Improved![/green] {new_result.combined_score:.3f} > {compare_score:.3f}"
                 )
                 if verbose:
                     console.print(f"  Operator: {op_type.value}")
@@ -226,7 +230,7 @@ async def run_evolve(
             else:
                 status = (
                     "[yellow]→ Neutral[/yellow]"
-                    if new_result.combined_score >= state.best_score - 0.01
+                    if new_result.combined_score >= compare_score - 0.01
                     else "[red]✗ Reverted[/red]"
                 )
                 console.print(f"\n{status} {new_result.combined_score:.3f}")
@@ -234,7 +238,6 @@ async def run_evolve(
                 explorer.record_operator_result(op_type, improved=False)
 
             state = new_state
-            state.iteration += 1
             progress.advance(task)
 
     progress.update(task, completed=max_iterations)

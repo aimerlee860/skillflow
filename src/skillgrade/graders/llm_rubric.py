@@ -15,6 +15,7 @@ from rich.console import Console
 from .base import BaseGrader
 from ..llm.client import LLMClient
 from ..types import GraderConfig, GraderResult
+from prompts import PromptManager
 
 console = Console()
 
@@ -442,28 +443,11 @@ class LLMGrader(BaseGrader):
             skill_summary=skill_summary,
         )
 
-        return f"""You are evaluating an AI agent's performance based on a rubric.
-
-## RUBRIC
-{rubric}
-
-## SESSION TRANSCRIPT
-{session_transcript}
-
-## INSTRUCTIONS
-1. Carefully review the session transcript above
-2. Evaluate the agent's performance against the rubric criteria
-3. Provide a score between 0.0 and 1.0
-4. Explain your reasoning in detail
-
-Note: The agent executes commands in a CLI environment. The Commands Executed section
-shows the actual shell commands that were run and their outputs. This is a true
-execution trace, not simulated behavior.
-
-Provide your evaluation as a JSON object with:
-- "score": A number between 0.0 and 1.0
-- "reasoning": Detailed explanation of the score
-"""
+        return PromptManager.get(
+            "skillgrade/grader_evaluation",
+            rubric=rubric,
+            session_transcript=session_transcript,
+        )
 
     def _build_unified_rubric(
         self,
@@ -499,61 +483,16 @@ Provide your evaluation as a JSON object with:
         trigger_actual_desc = "已触发" if actual_triggered else "未触发"
 
         # 构建统一评估标准
-        rubric = f"""# 评估标准
-
-## 基本信息
-- **技能名称**: {skill_name or "未知技能"}
-
-## 技能摘要
-{skill_summary if skill_summary else "无"}
-
-## 用户输入
-{instruction or ""}
-
-## 触发状态
-
-| 项目 | 状态 |
-|------|------|
-| **期望触发** | {trigger_expected_desc} |
-| **实际触发** | {trigger_actual_desc} |
-
-## 期望输出
-{expected if expected else "无"}
-
-## 真实输出（Agent 执行结果）
-{actual_output if actual_output else "（无输出）"}
-
-## 评估标准
-
-### 1. 核心信息匹配 (60%)
-- 关键数据是否正确（如金额、账号、日期、姓名等）
-- 主要结论是否一致
-- 核心操作是否完成
-
-### 2. 格式正确性 (20%)
-- 输出格式是否符合技能定义要求
-- 是否包含所有必要字段
-- 结构是否清晰
-
-### 3. 完整性 (20%)
-- 是否遗漏重要信息
-- 是否有多余内容
-- 逻辑是否连贯
-
-## 评分指南
-
-| 分数范围 | 说明 |
-|----------|------|
-| **1.0** | 完全匹配 - 核心信息准确，格式正确，内容完整 |
-| **0.7-0.9** | 良好 - 核心信息正确，格式或细节有小差异 |
-| **0.4-0.6** | 部分匹配 - 有一些错误或遗漏，但核心信息基本正确 |
-| **0.0-0.3** | 严重不匹配 - 核心信息错误或缺失 |
-
-## 输出要求
-
-以 JSON 格式输出评分结果：
-{{"score": 0.0-1.0, "reasoning": "评分理由"}}
-"""
+        rubric = PromptManager.get(
+            "skillgrade/grader_rubric",
+            skill_name=skill_name or "未知技能",
+            skill_summary=skill_summary if skill_summary else "无",
+            instruction=instruction or "",
+            trigger_expected_desc=trigger_expected_desc,
+            trigger_actual_desc=trigger_actual_desc,
+            expected=expected if expected else "无",
+            actual_output=actual_output if actual_output else "（无输出）",
+        )
         # 如果有特例化的评估细节（大模型生成的特殊评估要求），追加到评估标准中
         if config.rubric:
             rubric += f"""

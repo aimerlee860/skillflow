@@ -12,6 +12,28 @@ if TYPE_CHECKING:
     from ..types import WorkspaceFile
 
 
+def discover_skill_dirs(skills_dir: Path) -> list[str]:
+    """Scan a parent directory for skill subdirectories.
+
+    Each subdirectory containing a SKILL.md is treated as an individual skill.
+
+    Args:
+        skills_dir: Parent directory containing skill subdirectories
+
+    Returns:
+        List of absolute paths to individual skill directories
+    """
+    skills_dir = Path(skills_dir).resolve()
+    if not skills_dir.is_dir():
+        return []
+
+    result = []
+    for child in sorted(skills_dir.iterdir()):
+        if child.is_dir() and (child / "SKILL.md").exists():
+            result.append(str(child))
+    return result
+
+
 def create_temp_workspace(
     workspace_files: list[WorkspaceFile], skill_paths: list[str] | None = None
 ) -> Path:

@@ -171,6 +171,17 @@ Examples:
         "--model", "-m",
         help="Model name (default: LLM_MODEL_NAME env or gpt-4o)",
     )
+    p_create.add_argument(
+        "--skills-path",
+        default=str(Path.home() / ".agents" / "skills"),
+        help="Path to skills directory for deepagents (default: ~/.agents/skills/)",
+    )
+    p_create.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout in seconds for LLM skill creation (default: 300)",
+    )
 
     # ========== eval command ==========
     p_eval = subparsers.add_parser(
@@ -286,6 +297,11 @@ Examples:
         dest="parallel",
         help="Number of tasks to evaluate in parallel (default: 1, sequential)",
     )
+    p_eval.add_argument(
+        "--skills-path",
+        default=str(Path.home() / ".agents" / "skills"),
+        help="Path to skills directory for deepagents (default: ~/.agents/skills/)",
+    )
 
     # ========== evolve command ==========
     p_evolve = subparsers.add_parser("evolve", help="Automatically evolve a skill")
@@ -358,6 +374,11 @@ Examples:
         default=1,
         dest="parallel",
         help="Number of tasks to evaluate in parallel (default: 1, sequential)",
+    )
+    p_evolve.add_argument(
+        "--skills-path",
+        default=str(Path.home() / ".agents" / "skills"),
+        help="Path to skills directory for deepagents (default: ~/.agents/skills/)",
     )
 
     return parser
@@ -473,6 +494,7 @@ async def _create_with_llm(args) -> int:
         base_url=base_url,
         api_key=api_key,
         model_name=args.model,
+        skill_paths=[args.skills_path],
     )
 
     with Progress(
@@ -497,6 +519,7 @@ async def _create_with_llm(args) -> int:
                 context=args.context,
                 examples=args.examples,
                 template=args.template,
+                timeout=args.timeout,
             )
         progress.update(task, completed=True)
 
@@ -557,6 +580,7 @@ def handle_eval(args) -> int:
             show_progress=not args.quiet,
             json_output=getattr(args, 'json', False),
             parallel=getattr(args, 'parallel', 1),
+            skills_path=args.skills_path,
         )
     )
     return 0
@@ -626,6 +650,7 @@ def handle_evolve(args) -> int:
             keep_workspace=args.keep_workspace,
             verbose=args.verbose,
             parallel=getattr(args, 'parallel', 1),
+            skills_path=args.skills_path,
         )
     )
     return 0

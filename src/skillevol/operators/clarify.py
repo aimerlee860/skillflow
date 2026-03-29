@@ -3,6 +3,8 @@
 import re
 from typing import TYPE_CHECKING
 
+from prompts import PromptManager
+
 if TYPE_CHECKING:
     from skillevol.core.llm import LLMClient
     from skillevol.core.types import EvalResult
@@ -61,22 +63,11 @@ class ClarifyOperator:
             if "low_quality_output" in issues:
                 analysis += "- Output expectations unclear. Define expected output format precisely.\n"
 
-        return f"""Improve the clarity of the following SKILL.md. Focus on:
-1. Making instructions unambiguous
-2. Using clear, action-oriented language
-3. Breaking complex tasks into steps
-4. Defining technical terms
-5. Making trigger conditions explicit (when to use this skill)
-6. Clarifying expected output format
-
-{analysis}
-## Original SKILL.md
-```markdown
-{skill_md}
-```
-
-Output ONLY the improved SKILL.md content. Start directly with the content.
-"""
+        return PromptManager.get(
+            "skillevol/clarify",
+            performance_context=analysis,
+            skill_md=skill_md,
+        )
 
     def _clean_output(self, output: str) -> str:
         output = re.sub(r"^```markdown\n?", "", output)

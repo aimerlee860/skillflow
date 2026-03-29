@@ -39,6 +39,7 @@ from .config import _get_current_model_name
 from .context import SkillContext, SkillContextExtractor
 from .planning import TestPlanner
 from .understanding import SkillUnderstandingAnalyzer
+from prompts import PromptManager
 
 # Load environment variables
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -383,53 +384,13 @@ class TestCaseGenerator:
         if not llm_client or not self._skill_context:
             return None
 
-        prompt = f"""从技能示例中提取并生成完整的测试用例。
-
-## 技能定义
-
-{self._skill_context.to_full_context()}
-
-## 原始示例
-
-示例名称: {example.name}
-示例内容:
-{example.input}
-{example.expected_output or ""}
-
-## 任务
-
-请从上面的原始示例中：
-
-1. **提取用户输入 (instruction)**:
-   - 只提取用户的原始输入，不要包含任何处理步骤、技术细节或说明
-   - 如果原始内容中有引号包裹的用户输入，提取引号内的内容
-   - 确保提取的是纯粹的用户请求
-
-2. **生成期望输出 (expected)**:
-   - 根据技能定义，生成系统应该返回的详细输出
-   - 输出应该包含关键信息（如金额、账号、日期等）
-   - 格式应该符合技能定义的要求
-   - 如果技能有输出格式要求，按照格式生成
-
-3. **判定难度**:
-   - 简单(easy): 信息完整，可直接执行
-   - 中等(medium): 部分信息缺失
-   - 困难(hard): 关键信息严重缺失
-
-## 输出格式 (仅JSON)
-
-```json
-{{
-  "name": "示例-{example.name}",
-  "instruction": "用户的原始输入（只包含用户说的话，不要任何额外内容）",
-  "expected_trigger": true,
-  "expected": "期望的系统答复（详细、格式化）",
-  "difficulty": "easy或medium或hard",
-  "difficulty_reasoning": "难度判定理由"
-}}
-```
-
-只输出JSON，不要其他内容。"""
+        prompt = PromptManager.get(
+            "skillgrade/example_extraction",
+            skill_context=self._skill_context.to_full_context(),
+            example_name=example.name,
+            example_input=example.input,
+            example_expected_output=example.expected_output or "",
+        )
 
         try:
             response = llm_client.chat.invoke(prompt)
@@ -487,60 +448,19 @@ class TestCaseGenerator:
         if spec.target_function:
             function_hint = f"\n目标功能: {spec.target_function}"
 
-        return f"""基于技能定义生成一个测试用例。
-
-## 技能定义
-
-{self._skill_context.to_full_context()}
-
-## 测试规格
-
-- 类型: {type_names.get(spec.test_type, "正向测试")}
-- 目标难度: {difficulty_names.get(spec.difficulty_target, "中等")}
-{function_hint}{boundary_hint}
-
-## 测试类型说明
-
-{test_type_desc.get(spec.test_type, "正向测试")}
-
-## 难度定义
-
-- **简单** (easy): {difficulty_hints[DifficultyLevel.EASY]}
-- **中等** (medium): {difficulty_hints[DifficultyLevel.MEDIUM]}
-- **困难** (hard): {difficulty_hints[DifficultyLevel.HARD]}
-
-## 当前目标难度
-
-**{difficulty_names.get(spec.difficulty_target, "中等")}**: {difficulty_hints.get(spec.difficulty_target, difficulty_hints[DifficultyLevel.MEDIUM])}
-
-## 输出要求
-
-1. **instruction**: 用户的原始输入
-   - 符合目标难度 (简单=完整信息, 困难=缺失关键信息)
-   - 自然语言，符合真实用户表达习惯
-   - 不要包含处理流程、技术细节等
-
-2. **expected**: 期望的系统答复 (仅正向和演化测试需要)
-   - 详细的预期输出内容
-   - 包含关键信息点
-   - 负向测试填写 "不适用"
-
-3. **difficulty_reasoning**: 说明为什么符合目标难度
-
-## 输出格式 (仅JSON)
-
-```json
-{{
-  "name": "测试用例名称（简短描述）",
-  "instruction": "用户的原始输入",
-  "expected_trigger": true或false,
-  "expected": "期望的系统答复（负向测试填"不适用"）",
-  "difficulty": "easy或medium或hard",
-  "difficulty_reasoning": "难度判定理由"
-}}
-```
-
-只输出JSON，不要其他内容。"""
+        return PromptManager.get(
+            "skillgrade/test_case_generation",
+            skill_context=self._skill_context.to_full_context(),
+            test_type_name=type_names.get(spec.test_type, "正向测试"),
+            difficulty_name=difficulty_names.get(spec.difficulty_target, "中等"),
+            function_hint=function_hint,
+            boundary_hint=boundary_hint,
+            test_type_description=test_type_desc.get(spec.test_type, "正向测试"),
+            difficulty_easy=difficulty_hints[DifficultyLevel.EASY],
+            difficulty_medium=difficulty_hints[DifficultyLevel.MEDIUM],
+            difficulty_hard=difficulty_hints[DifficultyLevel.HARD],
+            difficulty_description=difficulty_hints.get(spec.difficulty_target, difficulty_hints[DifficultyLevel.MEDIUM]),
+        )
 
     def _parse_single_case(
         self,

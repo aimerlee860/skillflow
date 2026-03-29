@@ -114,6 +114,10 @@ class Evaluator:
         if self.config.parallel > 1:
             cmd.extend(["--parallel", str(self.config.parallel)])
 
+        # Add skills path if specified
+        if self.config.skills_path:
+            cmd.extend(["--skills-path", self.config.skills_path])
+
         cmd.append("--json")
 
         process = await asyncio.create_subprocess_exec(

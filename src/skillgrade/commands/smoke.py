@@ -124,6 +124,8 @@ async def run_smoke(
             tracking_reports = aggregate_reports(trial_results)
             if tracking_reports:
                 skill_stats = calculate_skill_statistics(tracking_reports, trial_results)
+                if skill_name:
+                    skill_stats = [s for s in skill_stats if s.skill_name == skill_name]
                 report.skill_statistics = [s.to_dict() for s in skill_stats]
 
             # Save individual task report (compact, no logs)
@@ -172,6 +174,8 @@ async def run_smoke(
                 tracking_reports = aggregate_reports(trial_results)
                 if tracking_reports:
                     skill_stats = calculate_skill_statistics(tracking_reports, trial_results)
+                    if skill_name:
+                        skill_stats = [s for s in skill_stats if s.skill_name == skill_name]
                     report.skill_statistics = [s.to_dict() for s in skill_stats]
 
                 # Emit progress to stderr for json_output mode

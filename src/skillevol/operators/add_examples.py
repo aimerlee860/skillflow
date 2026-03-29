@@ -3,6 +3,8 @@
 import re
 from typing import TYPE_CHECKING
 
+from prompts import PromptManager
+
 if TYPE_CHECKING:
     from skillevol.core.llm import LLMClient
     from skillevol.core.types import EvalResult
@@ -69,23 +71,12 @@ class AddExamplesOperator:
             else:
                 performance_context += "- Decent success rate. Add edge case examples for improvement.\n"
 
-        return f"""Add {num_examples} high-quality, relevant examples to the following SKILL.md.
-
-Examples should:
-1. Be concrete and actionable
-2. Show input/output when applicable
-3. Demonstrate edge cases
-4. Match the style of the existing content
-5. Help overcome diagnosed issues
-
-{performance_context}
-## Original SKILL.md
-```markdown
-{skill_md}
-```
-
-Output ONLY the improved SKILL.md with examples added. Start directly with the content.
-"""
+        return PromptManager.get(
+            "skillevol/add_examples",
+            num_examples=num_examples,
+            performance_context=performance_context,
+            skill_md=skill_md,
+        )
 
     def _determine_num_examples(self, results_history: list["EvalResult"]) -> int:
         if not results_history:

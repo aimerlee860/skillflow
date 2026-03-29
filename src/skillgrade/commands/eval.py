@@ -177,6 +177,7 @@ async def run_eval(
     metrics: list[str] | None = None,
     json_output: bool = False,
     parallel: int = 1,
+    skills_path: str | None = None,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run evaluation on a skill.
 
@@ -197,6 +198,7 @@ async def run_eval(
         metrics: Optional list of metrics to focus on
         json_output: Output results as JSON to stdout
         parallel: Number of tasks to evaluate in parallel (default: 1)
+        skills_path: Optional path to skills directory for deepagents
 
     Returns:
         Tuple of (list of reports, output_dir)
@@ -231,6 +233,15 @@ async def run_eval(
 
         config = runner.get_config()
         skill_paths = runner.get_skill_paths()
+
+        # Merge user-specified skills_path with auto-detected skill paths
+        if skills_path:
+            from ..core.workspace import discover_skill_dirs
+            skills_path_resolved = Path(skills_path).expanduser().resolve()
+            discovered = discover_skill_dirs(skills_path_resolved)
+            for s in discovered:
+                if s not in skill_paths:
+                    skill_paths.append(s)
 
         # Extract skill name and model name for report metadata
         import os
