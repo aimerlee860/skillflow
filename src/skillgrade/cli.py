@@ -8,30 +8,11 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
 from rich.console import Console
 
+from skillflow_env import load_llm_env
+
 console = Console()
-
-
-def _load_env_file() -> None:
-    """Load .env file from multiple locations.
-
-    Search order:
-    1. Current working directory (./env)
-    2. Project root (relative to this file's location)
-    """
-    # Try current working directory first
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        load_dotenv(cwd_env)
-        return
-
-    # Try project root (where pyproject.toml is)
-    project_root = Path(__file__).resolve().parent.parent.parent
-    project_env = project_root / ".env"
-    if project_env.exists():
-        load_dotenv(project_env)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -459,8 +440,8 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    # Load .env file before any command processing
-    _load_env_file()
+    # Load environment variables
+    load_llm_env()
 
     parser = create_parser()
     args = parser.parse_args()

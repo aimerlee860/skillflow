@@ -30,12 +30,9 @@ DEFAULT_CONFIG = {
 def _get_current_model_name() -> str:
     """Get the current LLM model name from environment or .env file."""
     import os
-    from dotenv import load_dotenv
-    from pathlib import Path
+    from skillflow_env import load_llm_env
 
-    # Load from .env if exists
-    project_root = Path(__file__).resolve().parent.parent.parent
-    load_dotenv(project_root / ".env")
+    load_llm_env()
 
     return os.environ.get("LLM_MODEL_NAME", "gpt-4o")
 

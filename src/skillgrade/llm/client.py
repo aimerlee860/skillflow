@@ -3,25 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from skillflow_env import load_llm_env
 
-# Load environment variables from .env file in project root
-# Try multiple strategies to find .env
-def _find_project_root() -> Path:
-    """Find project root by looking for pyproject.toml or .env."""
-    current = Path(__file__).resolve()
-    for _ in range(10):  # Max 10 levels up
-        current = current.parent
-        if (current / "pyproject.toml").exists() or (current / ".env").exists():
-            return current
-    return Path.cwd()
-
-_project_root = _find_project_root()
-_env_path = _project_root / ".env"
-load_dotenv(_env_path)
+load_llm_env()
 
 import httpx
 from langchain_core.language_models import BaseChatModel

@@ -35,10 +35,44 @@ uv pip install dist/skillflow-0.1.0-py3-none-any.whl --force-reinstall
 
 ## Environment Variables
 
+Skillflow requires the following environment variables for LLM features:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LLM_BASE_URL` | Yes | - | API endpoint (e.g., `https://api.openai.com/v1`) |
+| `LLM_MODEL_NAME` | Yes | `gpt-4o` | Model to use |
+| `LLM_API_KEY` | No* | - | API key for authentication |
+
+> *\*`LLM_API_KEY` is recommended but optional — a warning is shown if missing, and execution continues.*
+
+### Configuration Methods (highest priority first)
+
+1. **System environment variables** — `export LLM_BASE_URL=...`
+2. **`.env` file in current directory** — `./.env`
+3. **Global config** — `~/.skillflow/env`
+
+Only missing variables are loaded from lower-priority sources.
+
 ```bash
+# Method 1: System environment variables
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="your-api-key"
-export LLM_MODEL_NAME="gpt-4o"  # Optional, defaults to gpt-4o
+export LLM_MODEL_NAME="gpt-4o"
+
+# Method 2: .env file in current directory
+cat > .env << 'EOF'
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your-api-key
+LLM_MODEL_NAME=gpt-4o
+EOF
+
+# Method 3: Global config (shared across projects)
+mkdir -p ~/.skillflow
+cat > ~/.skillflow/env << 'EOF'
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your-api-key
+LLM_MODEL_NAME=gpt-4o
+EOF
 ```
 
 ## Commands

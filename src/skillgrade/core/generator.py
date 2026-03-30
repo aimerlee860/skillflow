@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from skillflow_env import load_llm_env
+
 from ..types import (
     DifficultyLevel,
     EvalConfig,
@@ -42,8 +44,7 @@ from .understanding import SkillUnderstandingAnalyzer
 from prompts import PromptManager
 
 # Load environment variables
-_project_root = Path(__file__).resolve().parent.parent.parent.parent
-load_dotenv(_project_root / ".env")
+load_llm_env()
 
 console = Console()
 
