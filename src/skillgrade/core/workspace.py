@@ -73,14 +73,13 @@ def create_temp_workspace(
 
 
 def _inject_skills(workspace: Path, skill_paths: list[str]) -> None:
-    """Inject skill files into the workspace.
+    """Inject skill files into the workspace by copying.
 
-    Creates the standard skill discovery paths:
-    - .agents/skills/
-    - .claude/skills/
+    Copies skills into workspace/skills/<name>/ so that the FilesystemBackend
+    with virtual_mode=True can access them. Only the target skill is injected
+    — no leakage from ~/.agents/skills/ or ~/.claude/skills/.
     """
-    agents_dir = workspace / ".agents" / "skills"
-    claude_dir = workspace / ".claude" / "skills"
+    skills_dir = workspace / "skills"
 
     for skill_path in skill_paths:
         skill_dir = Path(skill_path)
@@ -88,20 +87,8 @@ def _inject_skills(workspace: Path, skill_paths: list[str]) -> None:
             continue
 
         skill_name = skill_dir.name
-        _copy_skill_to_path(skill_dir, agents_dir / skill_name)
-        _copy_skill_to_path(skill_dir, claude_dir / skill_name)
-
-
-def _copy_skill_to_path(src: Path, dest: Path) -> None:
-    """Copy a skill directory to a destination."""
-    dest.mkdir(parents=True, exist_ok=True)
-
-    for item in src.iterdir():
-        dest_item = dest / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest_item, dirs_exist_ok=True)
-        else:
-            shutil.copy2(item, dest_item)
+        dest = skills_dir / skill_name
+        shutil.copytree(skill_dir, dest, dirs_exist_ok=True)
 
 
 def cleanup_workspace(workspace: Path) -> None:

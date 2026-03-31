@@ -53,7 +53,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-force-include = {"src/cli.py" = "cli.py", "src/skillforge" = "skillforge", "src/skillgrade" = "skillgrade", "src/skillevol" = "skillevol", "src/prompts" = "prompts"}
+force-include = {"src/cli.py" = "cli.py", "src/skillflow_env.py" = "skillflow_env.py", "src/skillforge" = "skillforge", "src/skillgrade" = "skillgrade", "src/skillevol" = "skillevol", "src/prompts" = "prompts"}
 
 [tool.ruff]
 line-length = 100

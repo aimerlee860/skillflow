@@ -160,8 +160,19 @@ Examples:
     p_create.add_argument(
         "--timeout",
         type=int,
-        default=300,
-        help="Timeout in seconds for LLM skill creation (default: 300)",
+        default=3600,
+        help="Timeout in seconds for LLM skill creation (default: 3600)",
+    )
+    p_create.add_argument(
+        "--mode",
+        choices=["quick", "full"],
+        default="quick",
+        help="Creation mode: quick (default, skip eval/iteration) or full (complete eval loop)",
+    )
+    p_create.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed agent iteration info",
     )
 
     # ========== eval command ==========
@@ -279,9 +290,9 @@ Examples:
         help="Number of tasks to evaluate in parallel (default: 1, sequential)",
     )
     p_eval.add_argument(
-        "--skills-path",
-        default=str(Path.home() / ".agents" / "skills"),
-        help="Path to skills directory for deepagents (default: ~/.agents/skills/)",
+        "--verbose", "-v",
+        action="store_true",
+        help="Show debug information during evaluation",
     )
 
     # ========== evolve command ==========
@@ -457,7 +468,7 @@ async def _create_with_llm(args) -> int:
     from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
     console.rule(f"[bold cyan]Skillflow Create[/bold cyan]")
-    console.print(f"[dim]Mode:[/dim] [green]LLM[/green]  [dim]Skill:[/dim] [green]{args.name}[/green]")
+    console.print(f"[dim]Mode:[/dim] [green]LLM ({args.mode})[/green]  [dim]Skill:[/dim] [green]{args.name}[/green]")
     console.print()
 
     base_url = args.base_url or os.environ.get("LLM_BASE_URL")
@@ -476,6 +487,8 @@ async def _create_with_llm(args) -> int:
         api_key=api_key,
         model_name=args.model,
         skill_paths=[args.skills_path],
+        mode=args.mode,
+        verbose=args.verbose,
     )
 
     with Progress(
@@ -561,7 +574,7 @@ def handle_eval(args) -> int:
             show_progress=not args.quiet,
             json_output=getattr(args, 'json', False),
             parallel=getattr(args, 'parallel', 1),
-            skills_path=args.skills_path,
+            verbose=getattr(args, 'verbose', False),
         )
     )
     return 0

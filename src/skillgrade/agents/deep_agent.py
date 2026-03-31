@@ -47,6 +47,7 @@ class DeepAgent(BaseAgent):
         max_execution_time: int = 300,
         skill_paths: list[str] | None = None,
         enable_tracking: bool = True,
+        verbose: bool = False,
     ):
         """Initialize the Deep Agent.
 
@@ -58,6 +59,7 @@ class DeepAgent(BaseAgent):
             max_execution_time: Maximum execution time in seconds
             skill_paths: Optional list of skill paths for native skill support
             enable_tracking: Whether to enable skill tracking
+            verbose: Show debug information
         """
         self.llm_client = LLMClient(
             base_url=base_url,
@@ -68,6 +70,7 @@ class DeepAgent(BaseAgent):
         self.max_execution_time = max_execution_time
         self.skill_paths = skill_paths or []
         self.enable_tracking = enable_tracking
+        self.verbose = verbose
 
         # Skill tracking middleware (created per run with workspace context)
         self._tracking_middleware: SkillTrackingMiddleware | None = None
@@ -103,11 +106,9 @@ class DeepAgent(BaseAgent):
         Returns:
             Compiled deep agent graph
         """
-        # Build skill sources list for deepagents
-        # Skills are injected into workspace/.agents/skills/ and workspace/.claude/skills/
-        # We need to provide virtual paths relative to the workspace root
+        # Skills are symlinked at workspace/skills/<name>
         skill_source_paths = [
-            "/.agents/skills/",
+            "/skills/",
         ]
 
         # Create filesystem backend for skill loading
@@ -117,16 +118,49 @@ class DeepAgent(BaseAgent):
             virtual_mode=True,
         )
 
+        # Debug: verify backend can access skills and subdirectories
+        if self.verbose:
+            from rich.console import Console as _Console
+            _dbg = _Console()
+            try:
+                items = backend.ls_info("/skills/")
+                _dbg.print(f"[dim]  [DEBUG] ls_info('/skills/') → {len(items)} items[/dim]")
+                for item in items:
+                    _dbg.print(f"[dim]    {item.get('path')} is_dir={item.get('is_dir')}[/dim]")
+                for item in items:
+                    if item.get("is_dir"):
+                        skill_md_path = item["path"].rstrip("/") + "/SKILL.md"
+                        resp = backend.download_files([skill_md_path])
+                        r = resp[0]
+                        status = f"✓ {len(r.content)}B" if r.content else f"✗ {r.error}"
+                        _dbg.print(f"[dim]    download({skill_md_path}) → {status}[/dim]")
+
+                        # Test subdirectory access
+                        skill_dir_path = item["path"]
+                        sub_items = backend.ls_info(skill_dir_path)
+                        _dbg.print(f"[dim]    ls_info('{skill_dir_path}') → {len(sub_items)} items[/dim]")
+                        for sub in sub_items:
+                            _dbg.print(f"[dim]      {sub.get('path')} is_dir={sub.get('is_dir')}[/dim]")
+                        # Test reading a file in subdirectory
+                        for sub in sub_items:
+                            if sub.get("is_dir") and "scripts" in sub.get("path", ""):
+                                scripts = backend.ls_info(sub["path"])
+                                for s in scripts:
+                                    if not s.get("is_dir"):
+                                        sr = backend.download_files([s["path"]])
+                                        st = f"✓ {len(sr[0].content)}B" if sr[0].content else f"✗ {sr[0].error}"
+                                        _dbg.print(f"[dim]      download({s['path']}) → {st}[/dim]")
+            except Exception as e:
+                _dbg.print(f"[dim]  [DEBUG] backend error: {e}[/dim]")
+
         # Build middleware stack
         middleware = []
         if self.enable_tracking and skill_sources:
             # Use workspace-injected skill paths for tracking
-            # Skills are injected at .agents/skills/<skill_name>/ and .claude/skills/<skill_name>/
             workspace_skill_paths = []
             for skill_source in skill_sources:
                 skill_name = Path(skill_source).name
-                workspace_skill_paths.append(str(Path(workspace) / ".agents" / "skills" / skill_name))
-                workspace_skill_paths.append(str(Path(workspace) / ".claude" / "skills" / skill_name))
+                workspace_skill_paths.append(str(Path(workspace) / "skills" / skill_name))
 
             # Create tracking middleware with workspace paths
             self._tracking_middleware = SkillTrackingMiddleware(
@@ -204,13 +238,44 @@ class DeepAgent(BaseAgent):
             if timeout:
                 config["max_execution_time"] = timeout
 
-            result = await self._graph.ainvoke(
+            # Use astream with dynamic early exit
+            soft_limit = 10
+            best_output = ""
+            messages = []
+            iteration = 0
+
+            if self.verbose:
+                from rich.console import Console as _Console
+                _dbg = _Console()
+                _dbg.print(f"[dim]  [DEBUG] skill_paths: {self.skill_paths}[/dim]")
+
+            async for event in self._graph.astream(
                 {"messages": [HumanMessage(content=instruction)]},
                 config=config,
-            )
+                stream_mode="values",
+            ):
+                messages = event.get("messages", messages)
+                iteration += 1
 
-            messages = result.get("messages", [])
-            output = ""
+                # Check last AI message for natural completion
+                last_ai = next(
+                    (m for m in reversed(messages) if getattr(m, "type", None) == "ai"),
+                    None,
+                )
+                if last_ai:
+                    content = getattr(last_ai, "content", "") or ""
+                    tool_calls = getattr(last_ai, "tool_calls", [])
+                    if content and not tool_calls:
+                        best_output = content
+                        if iteration > soft_limit:
+                            if self.verbose:
+                                _dbg.print(f"[dim]  [DEBUG] soft exit at iteration {iteration}, output len={len(best_output)}[/dim]")
+                            break
+
+            if self.verbose:
+                _dbg.print(f"[dim]  [DEBUG] total iterations: {iteration}, messages: {len(messages)}, output len: {len(best_output)}[/dim]")
+
+            output = best_output
             logs = []
             skill_tracking_logs = []
 

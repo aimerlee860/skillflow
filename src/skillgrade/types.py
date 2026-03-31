@@ -94,14 +94,21 @@ class FunctionSpec:
     weight: float = 1.0  # 重要性权重 (0.0-1.0)
     input_fields: list[str] = field(default_factory=list)
     description: str = ""
+    error_conditions: list[str] = field(default_factory=list)
+    output_description: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "weight": self.weight,
             "inputFields": self.input_fields,
             "description": self.description,
         }
+        if self.error_conditions:
+            result["errorConditions"] = self.error_conditions
+        if self.output_description:
+            result["outputDescription"] = self.output_description
+        return result
 
 
 @dataclass
@@ -116,6 +123,11 @@ class SkillProfile:
     type_weights: dict[str, float] = field(default_factory=dict)
     summary: str | None = None  # LLM 生成的技能摘要 (500-600字)
 
+    # 深度分析维度
+    user_scenarios: list[dict[str, str]] = field(default_factory=list)
+    function_dependencies: list[dict[str, str]] = field(default_factory=list)
+    domain_constraints: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         result = {
             "complexity": self.complexity.value,
@@ -127,6 +139,12 @@ class SkillProfile:
         }
         if self.summary:
             result["summary"] = self.summary
+        if self.user_scenarios:
+            result["userScenarios"] = self.user_scenarios
+        if self.function_dependencies:
+            result["functionDependencies"] = self.function_dependencies
+        if self.domain_constraints:
+            result["domainConstraints"] = self.domain_constraints
         return result
 
 

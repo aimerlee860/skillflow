@@ -13,6 +13,7 @@ import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 
 
@@ -102,6 +103,11 @@ class LLMClient:
         self.base_url = base_url or os.environ["LLM_BASE_URL"]
         self.api_key = api_key or os.environ["LLM_API_KEY"]
         self.model_name = model_name or os.environ.get("LLM_MODEL_NAME", "gpt-4o")
+        self.rate_limiter = InMemoryRateLimiter(
+            requests_per_second=0.2,
+            check_every_n_seconds=0.1,
+            max_bucket_size=4,
+        )
 
     @property
     def chat(self) -> ChatOpenAI:
@@ -116,6 +122,7 @@ class LLMClient:
             max_retries=3,
             http_client=sync_client,
             http_async_client=async_client,
+            rate_limiter=self.rate_limiter,
         )
 
     async def achat(

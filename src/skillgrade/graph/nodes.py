@@ -14,7 +14,7 @@ from .state import SmokeState, TrialState
 
 
 async def setup_node(state: SmokeState) -> dict[str, Any]:
-    """Set up the workspace for evaluation.
+    """Set up the workspace for evaluation (once per task, reused across trials).
 
     Args:
         state: Current graph state
@@ -29,9 +29,24 @@ async def setup_node(state: SmokeState) -> dict[str, Any]:
         skill_paths=state.get("skill_paths", []),
     )
 
+    # Debug: verify skill injection
+    workspace_path = Path(workspace)
+    skills_dir = workspace_path / "skills"
+    verbose = state.get("verbose", False)
+    if verbose:
+        if skills_dir.exists():
+            from rich.console import Console
+            _console = Console()
+            for d in skills_dir.iterdir():
+                skill_md = d / "SKILL.md" if d.is_dir() else None
+                _console.print(f"[dim]  [DEBUG] skills/{d.name}: SKILL.md={'✓' if skill_md and skill_md.exists() else '✗'}[/dim]")
+        else:
+            from rich.console import Console
+            Console().print("[dim]  [DEBUG] workspace has no skills/ directory![/dim]")
+
     return {
         "workspace": str(workspace),
-        "trial_start_time": time.time(),  # 记录 trial 开始时间
+        "trial_start_time": time.time(),
         "logs": [
             {
                 "type": "setup",
@@ -61,6 +76,7 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
         api_key=state.get("llm_api_key"),
         skill_paths=skill_paths,
         enable_tracking=skill_tracking_enabled and len(skill_paths) > 0,
+        verbose=state.get("verbose", False),
     )
     workspace = state.get("workspace", "")
     timeout = state.get("agent_timeout", 300)
@@ -104,6 +120,56 @@ async def run_agent_node(state: SmokeState) -> dict[str, Any]:
                 }
             ],
         }
+
+
+def _calculate_gated_reward(
+    grader_results: list[dict[str, Any]],
+    expected_trigger: bool,
+) -> float:
+    """Calculate reward using gate-based logic.
+
+    Scoring rules:
+    - Negative test (expected_trigger=False):
+        Not triggered → 1.0, wrongly triggered → 0.1
+    - Positive test (expected_trigger=True):
+        Not triggered → 0.0 (hard fail), triggered → llm_score (quality)
+        If no LLM grader, triggered → 1.0
+
+    Args:
+        grader_results: List of grader result dicts (score, weight, graderType)
+        expected_trigger: Whether the skill should have been triggered
+
+    Returns:
+        Final reward value (0.0 - 1.0)
+    """
+    # Extract trigger grader result
+    trigger_result = next(
+        (r for r in grader_results if r.get("graderType") == "trigger"),
+        None,
+    )
+    # Extract LLM grader result
+    llm_result = next(
+        (r for r in grader_results if r.get("graderType") == "llm_rubric"),
+        None,
+    )
+
+    actual_triggered = trigger_result.get("score", 0.0) > 0.5 if trigger_result else False
+
+    if not expected_trigger:
+        # Negative test: skill should NOT trigger
+        if not actual_triggered:
+            return 1.0
+        else:
+            return 0.1
+    else:
+        # Positive test: skill should trigger
+        if not actual_triggered:
+            return 0.0
+        # Triggered correctly, check response quality
+        if llm_result:
+            return llm_result.get("score", 0.0)
+        else:
+            return 1.0
 
 
 async def grade_node(state: SmokeState) -> dict[str, Any]:
@@ -200,8 +266,8 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
             }
         )
 
-    total_weight = sum(r["weight"] for r in grader_results) if grader_results else 1.0
-    reward = sum(r["score"] * r["weight"] for r in grader_results) / total_weight
+    # Gate-based reward calculation
+    reward = _calculate_gated_reward(grader_results, expected_trigger=trigger)
 
     # 计算 trial 耗时
     trial_start = state.get("trial_start_time", time.time())
@@ -222,6 +288,8 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
                 "skill_tracking": skill_tracking_data,
             }
         ],
+        "current_trial": state.get("current_trial", 0) + 1,
+        "trial_start_time": time.time(),
         "logs": [
             {
                 "type": "reward",
@@ -233,7 +301,7 @@ async def grade_node(state: SmokeState) -> dict[str, Any]:
 
 
 async def cleanup_node(state: SmokeState) -> dict[str, Any]:
-    """Clean up the workspace.
+    """Clean up the workspace (called once after all trials).
 
     Args:
         state: Current graph state
@@ -248,7 +316,6 @@ async def cleanup_node(state: SmokeState) -> dict[str, Any]:
         await provider.cleanup(workspace)
 
     return {
-        "current_trial": state.get("current_trial", 0) + 1,
         "logs": [
             {
                 "type": "cleanup",
@@ -262,18 +329,19 @@ async def cleanup_node(state: SmokeState) -> dict[str, Any]:
 def should_continue(state: SmokeState) -> str:
     """Determine if evaluation should continue to next trial.
 
-    Args:
-        state: Current graph state
+    Called after grade_node. Increments trial counter and decides path:
+    - "agent": more trials remaining
+    - "cleanup": all trials done
 
     Returns:
-        "setup" to continue, "__end__" to finish
+        "agent" to continue, "cleanup" to finish
     """
     current = state.get("current_trial", 0)
     total = state.get("total_trials", 1)
 
     if current < total - 1:
-        return "setup"
-    return "__end__"
+        return "agent"
+    return "cleanup"
 
 
 def increment_trial(state: SmokeState, updates: dict[str, Any]) -> dict[str, Any]:

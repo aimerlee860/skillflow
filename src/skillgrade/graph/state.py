@@ -51,6 +51,9 @@ class SmokeState(TypedDict, total=False):
     # Debug directory for saving grader prompts/responses
     debug_dir: str | None
 
+    # Verbose mode: show debug information
+    verbose: bool
+
 
 class TrialState(TypedDict, total=False):
     """State for a single trial within the smoke evaluation."""

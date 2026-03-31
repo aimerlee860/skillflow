@@ -42,6 +42,7 @@ async def run_smoke(
     model_name: str | None = None,
     parallel: int = 1,
     json_output: bool = False,
+    verbose: bool = False,
 ) -> tuple[list[dict[str, Any]], Path]:
     """Run smoke evaluation on a skill.
 
@@ -58,6 +59,7 @@ async def run_smoke(
         model_name: Optional model name for metadata
         parallel: Number of tasks to evaluate in parallel (default: 1, sequential)
         json_output: Output results as JSON to stdout (also emits progress to stderr)
+        verbose: Show debug information
 
     Returns:
         Tuple of (list of reports, output_dir)
@@ -107,6 +109,7 @@ async def run_smoke(
                         debug_dir=debug_dir,
                         skill_name=skill_info_name,
                         skill_summary=skill_info_summary,
+                        verbose=verbose,
                     )
                     progress.update(task_progress, completed=trials)
             else:
@@ -117,6 +120,7 @@ async def run_smoke(
                     debug_dir=debug_dir,
                     skill_name=skill_info_name,
                     skill_summary=skill_info_summary,
+                    verbose=verbose,
                 )
 
             # Calculate skill statistics from trial results
@@ -167,6 +171,7 @@ async def run_smoke(
                     debug_dir=debug_dir,
                     skill_name=skill_info_name,
                     skill_summary=skill_info_summary,
+                    verbose=verbose,
                 )
 
                 # Calculate skill statistics from trial results

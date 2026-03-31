@@ -36,7 +36,6 @@ from ..types import (
     TestPlan,
     TestType,
 )
-from .analysis import SkillAnalyzer
 from .config import _get_current_model_name
 from .context import SkillContext, SkillContextExtractor
 from .planning import TestPlanner
@@ -113,7 +112,6 @@ class TestCaseGenerator:
         self.model = model or _get_current_model_name()
         self.include_skill_md_in_rubric = include_skill_md_in_rubric
         self.parallel = max(1, parallel)
-        self.analyzer = SkillAnalyzer()
         self._llm_client = None
         self._skill_md_content: str = ""
         self._skill_context: SkillContext | None = None
@@ -144,6 +142,7 @@ class TestCaseGenerator:
         skill_dir: Path,
         profile: SkillProfile,
         plan: TestPlan,
+        structural_analysis: SkillAnalysis | None = None,
     ) -> EvalConfig:
         """Generate evaluation configuration from profile and plan.
 
@@ -151,6 +150,7 @@ class TestCaseGenerator:
             skill_dir: Path to skill directory
             profile: Skill analysis result
             plan: Test plan with specifications
+            structural_analysis: Pre-computed structural analysis (avoids re-running SkillAnalyzer)
 
         Returns:
             EvalConfig with test tasks
@@ -163,8 +163,13 @@ class TestCaseGenerator:
         context_extractor = SkillContextExtractor()
         self._skill_context = context_extractor.extract(skill_md_path)
 
-        # Analyze skill for metadata
-        analysis = self.analyzer.analyze(skill_dir)
+        # Use pre-computed structural analysis or run SkillAnalyzer
+        if structural_analysis:
+            analysis = structural_analysis
+        else:
+            from .analysis import SkillAnalyzer
+            analyzer = SkillAnalyzer()
+            analysis = analyzer.analyze(skill_dir)
 
         # Generate test cases from plan
         test_cases, example_count, llm_count = self._generate_test_cases(profile, plan, analysis)
@@ -387,7 +392,7 @@ class TestCaseGenerator:
 
         prompt = PromptManager.get(
             "skillgrade/example_extraction",
-            skill_context=self._skill_context.to_full_context(),
+            skill_context=self._skill_context.to_complete_context(),
             example_name=example.name,
             example_input=example.input,
             example_expected_output=example.expected_output or "",
@@ -451,7 +456,7 @@ class TestCaseGenerator:
 
         return PromptManager.get(
             "skillgrade/test_case_generation",
-            skill_context=self._skill_context.to_full_context(),
+            skill_context=self._skill_context.to_complete_context(),
             test_type_name=type_names.get(spec.test_type, "正向测试"),
             difficulty_name=difficulty_names.get(spec.difficulty_target, "中等"),
             function_hint=function_hint,
@@ -545,10 +550,10 @@ class TestCaseGenerator:
 
         graders = []
 
-        # 1. Trigger grader (checks if skill was triggered)
+        # 1. Trigger grader (gate: decides if skill activation was correct)
         graders.append(GraderConfig(
             type=GraderType.TRIGGER,
-            weight=0.5,
+            weight=1.0,
             expected_trigger=case.expected_trigger,
         ))
 
@@ -558,7 +563,7 @@ class TestCaseGenerator:
             rubric = self._build_rubric(case)
             graders.append(GraderConfig(
                 type=GraderType.LLM,
-                weight=0.5,
+                weight=1.0,
                 rubric=rubric,
                 model=self.model,
             ))
@@ -575,20 +580,44 @@ class TestCaseGenerator:
         )
 
     def _build_rubric(self, case: TestCase) -> str | None:
-        """Build special evaluation details for a test case.
+        """Build case-specific evaluation rubric.
 
-        只生成特例化的评估细节，完整的评估标准由统一模板在评估时拼接。
-        如果没有额外的评估细则，返回 None。
+        Constructs evaluation criteria from the test case's expected output
+        and difficulty reasoning, providing specific checkpoints for the
+        LLM grader beyond the unified template.
 
         Args:
             case: TestCase with instruction, expected output, etc.
 
         Returns:
-            特例化的评估细节字符串，或 None
+            Case-specific rubric string, or None if no expected output
         """
-        # 目前不生成特例化评估细节，返回 None
-        # 完整的评估标准由 LLMGrader 在评估时使用统一模板拼接
-        return None
+        if not case.expected:
+            return None
+
+        parts = ["基于期望输出，请特别关注以下检查点:"]
+
+        # Extract key checkpoints from expected output
+        # Split into sentences/items for structured evaluation
+        expected = case.expected
+
+        # Parse numbered or bulleted items from expected output
+        items = re.split(r'[。\n]', expected)
+        items = [item.strip() for item in items if item.strip()]
+
+        if items:
+            for i, item in enumerate(items[:8], 1):
+                # Truncate long items to keep rubric concise
+                checkpoint = item[:100] if len(item) > 100 else item
+                parts.append(f"{i}. 检查输出中是否包含或匹配: {checkpoint}")
+        else:
+            parts.append(f"1. 检查输出是否与期望结果一致: {expected[:200]}")
+
+        # Add difficulty-specific guidance
+        if case.difficulty_reasoning:
+            parts.append(f"\n难度说明: {case.difficulty_reasoning[:200]}")
+
+        return "\n".join(parts)
 
     def _slugify(self, text: str) -> str:
         """Convert text to slug format."""
@@ -666,6 +695,9 @@ def generate_eval_plan(
         include_skill_md_in_rubric=include_skill_md_in_rubric,
         parallel=parallel,
     )
-    config = generator.generate(skill_dir, profile, plan)
+    config = generator.generate(
+        skill_dir, profile, plan,
+        structural_analysis=analyzer.structural_analysis,
+    )
 
     return config

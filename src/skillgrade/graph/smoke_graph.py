@@ -26,11 +26,9 @@ def create_smoke_graph() -> Any:
     """Create the smoke evaluation state graph.
 
     The graph performs the following workflow:
-    1. Setup - Create workspace
-    2. Agent - Run the agent
-    3. Grade - Evaluate results
-    4. Cleanup - Remove workspace
-    5. Repeat for N trials
+    1. Setup - Create workspace (once)
+    2. Agent → Grade loop (repeat for N trials)
+    3. Cleanup - Remove workspace (once)
 
     Returns:
         Compiled LangGraph
@@ -45,16 +43,17 @@ def create_smoke_graph() -> Any:
     workflow.add_edge(START, "setup")
     workflow.add_edge("setup", "agent")
     workflow.add_edge("agent", "grade")
-    workflow.add_edge("grade", "cleanup")
 
     workflow.add_conditional_edges(
-        "cleanup",
+        "grade",
         should_continue,
         {
-            "setup": "setup",
-            "__end__": END,
+            "agent": "agent",
+            "cleanup": "cleanup",
         },
     )
+
+    workflow.add_edge("cleanup", END)
 
     return workflow.compile()
 
@@ -66,6 +65,7 @@ async def run_smoke_eval(
     debug_dir: str | None = None,
     skill_name: str | None = None,
     skill_summary: str | None = None,
+    verbose: bool = False,
 ) -> EvalReport:
     """Run a smoke evaluation for a single task.
 
@@ -77,6 +77,7 @@ async def run_smoke_eval(
                    Can also be set via SKILLGRADE_DEBUG_DIR environment variable.
         skill_name: Optional skill name for grader context
         skill_summary: Optional skill summary for grader context
+        verbose: Show debug information
 
     Returns:
         EvalReport with aggregated results
@@ -112,6 +113,7 @@ async def run_smoke_eval(
         "skill_tracking_enabled": True,
         "skill_tracking_reports": [],
         "debug_dir": effective_debug_dir,
+        "verbose": verbose,
     }
 
     # Collect all state updates from the graph

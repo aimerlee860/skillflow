@@ -32,13 +32,6 @@ class TestPlanner:
     4. Ensures core functions are covered
     """
 
-    # Base test counts by complexity level
-    BASE_COUNTS = {
-        ComplexityLevel.SIMPLE: 6,
-        ComplexityLevel.MODERATE: 10,
-        ComplexityLevel.COMPLEX: 16,
-    }
-
     # Default type distribution weights
     DEFAULT_TYPE_WEIGHTS = {
         TestType.POSITIVE: 0.40,
@@ -88,21 +81,8 @@ class TestPlanner:
         )
 
     def _calculate_total_count(self, profile: SkillProfile) -> int:
-        """Calculate total number of tests based on complexity.
-
-        Formula: base_count + function_bonus
-        - Simple: 6 + len(functions) * 0.5
-        - Moderate: 10 + len(functions) * 0.5
-        - Complex: 16 + len(functions) * 0.5
-        """
-        base = self.BASE_COUNTS.get(profile.complexity, 10)
-        function_bonus = int(len(profile.core_functions) * 0.5)
-
-        # Use recommended_total from profile if available
-        if profile.recommended_total > 0:
-            return profile.recommended_total
-
-        return base + function_bonus
+        """Get total test count from skill profile's recommended_total."""
+        return profile.recommended_total
 
     def _allocate_types(
         self, profile: SkillProfile, total: int
@@ -159,31 +139,42 @@ class TestPlanner:
     def _normalize_and_allocate(
         self, weights: dict[TestType, float], total: int
     ) -> dict[TestType, int]:
-        """Normalize weights and allocate integer counts."""
+        """Normalize weights and allocate integer counts.
+
+        Guarantees each type gets at least 1 when total >= num_types,
+        otherwise distributes proportionally with no negative remainder.
+        """
         # Normalize weights
         total_weight = sum(weights.values())
         if total_weight == 0:
-            # Equal distribution fallback
             equal_weight = 1.0 / len(weights)
             weights = {k: equal_weight for k in weights}
         else:
             weights = {k: v / total_weight for k, v in weights.items()}
 
-        # Allocate integer counts
-        allocation = {}
-        remaining = total
+        num_types = len(weights)
 
-        # Sort by weight descending for allocation
+        # If total <= number of types, give 1 to highest-weighted types
+        if total <= num_types:
+            allocation = {tt: 0 for tt in weights}
+            sorted_types = sorted(weights.keys(), key=lambda t: weights[t], reverse=True)
+            for i in range(total):
+                allocation[sorted_types[i]] = 1
+            return allocation
+
+        # Normal allocation: each type gets at least 1, remainder by weight
+        allocation = {tt: 1 for tt in weights}
+        remaining = total - num_types
+
+        # Distribute remaining proportionally by weight
         sorted_types = sorted(weights.items(), key=lambda x: x[1], reverse=True)
-
         for i, (test_type, weight) in enumerate(sorted_types):
             if i == len(sorted_types) - 1:
-                # Last type gets remaining
-                allocation[test_type] = remaining
+                allocation[test_type] += remaining
             else:
-                count = max(1, int(total * weight))
-                allocation[test_type] = count
-                remaining -= count
+                extra = max(0, int(total * weight) - 1)
+                allocation[test_type] += extra
+                remaining -= extra
 
         return allocation
 

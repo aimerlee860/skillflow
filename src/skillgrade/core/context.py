@@ -37,6 +37,9 @@ class SkillContext:
     # Raw summary for LLM (limited length)
     raw_summary: str = ""
 
+    # Complete SKILL.md content (no truncation)
+    full_content: str = ""
+
     def to_prompt_text(self) -> str:
         """Convert to LLM prompt format.
 
@@ -66,6 +69,18 @@ class SkillContext:
             return f"{base}\n\n## 详细信息\n{self.raw_summary}"
         return base
 
+    def to_complete_context(self) -> str:
+        """Return complete SKILL.md content for deep analysis.
+
+        Use this for prompts that need full detail (skill analysis,
+        summary, test case generation). Modern LLMs have large context
+        windows, so sending the full SKILL.md is preferable to truncation.
+        """
+        if self.full_content:
+            return self.full_content
+        # Fallback to truncated version if full content not available
+        return self.to_full_context()
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -74,6 +89,7 @@ class SkillContext:
             "compatibility": self.compatibility,
             "outline": self.outline,
             "rawSummary": self.raw_summary,
+            "fullContent": self.full_content,
         }
 
 
@@ -131,6 +147,7 @@ class SkillContextExtractor:
             compatibility=frontmatter.get("compatibility", []),
             outline=outline,
             raw_summary=raw_summary,
+            full_content=content,
         )
 
     def _extract_frontmatter(self, content: str) -> dict[str, Any]:

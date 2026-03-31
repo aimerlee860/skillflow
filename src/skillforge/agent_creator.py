@@ -13,6 +13,7 @@ from rich.console import Console
 
 from skillgrade.llm.client import LLMClient
 from skillgrade.tools import shell
+from skillforge.middleware import ThinkingStripMiddleware
 from prompts import PromptManager
 
 console = Console()
@@ -31,8 +32,10 @@ class SkillCreatorAgent:
         model_name: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        max_iterations: int = 100,
+        max_iterations: int | None = None,
         skill_paths: list[str] | None = None,
+        mode: str = "quick",
+        verbose: bool = False,
     ):
         """Initialize the Skill Creator Agent.
 
@@ -40,15 +43,19 @@ class SkillCreatorAgent:
             model_name: Override model name
             base_url: Override base URL for API
             api_key: Override API key
-            max_iterations: Maximum number of agent iterations
+            max_iterations: Maximum number of agent iterations (default: 100 for quick, 1000 for full)
             skill_paths: Optional list of skill directory paths for progressive loading
+            mode: Creation mode — "quick" or "full"
+            verbose: Show detailed agent iteration info
         """
         self.llm_client = LLMClient(
             base_url=base_url,
             api_key=api_key,
             model_name=model_name,
         )
-        self.max_iterations = max_iterations
+        self.verbose = verbose
+        self.mode = mode
+        self.max_iterations = max_iterations or (100 if mode == "quick" else 1000)
         self.model_name = self.llm_client.model_name
         self.skill_paths = skill_paths or []
 
@@ -81,12 +88,15 @@ class SkillCreatorAgent:
         )
 
         # Create the deep agent — skill-creator is loaded progressively
+        # ThinkingStripMiddleware strips reasoning text from historical AI
+        # messages to keep token usage low during long agent loops.
         self.graph = create_deep_agent(
             model=self.llm_client.chat,
             tools=self.tools,
             system_prompt=self.system_prompt,
             skills=skill_source_paths,
             backend=backend,
+            middleware=[ThinkingStripMiddleware()],
         )
 
     def _build_system_prompt(self) -> str:
@@ -101,7 +111,7 @@ class SkillCreatorAgent:
         context: Optional[str] = None,
         examples: Optional[list[str]] = None,
         template: str = "default",
-        timeout: int = 300,
+        timeout: int = 3600,
     ) -> Path:
         """Create a new skill using the skill-creator guidance.
 
@@ -112,12 +122,17 @@ class SkillCreatorAgent:
             context: Additional context (code snippets, docs, etc.)
             examples: Example use cases for the skill
             template: Template variant to use (default, code-review, etc.)
-            timeout: Maximum seconds to wait for creation (default 300)
+            timeout: Maximum seconds to wait for creation (default 3600)
 
         Returns:
             Path to the created skill directory
         """
-        skill_path = output_dir / name
+        # Real absolute path for filesystem checks (_DONE, SKILL.md)
+        skill_path = (output_dir / name).resolve()
+
+        # Virtual path for agent prompt — relative to FilesystemBackend root (home)
+        # The agent operates in a virtual filesystem rooted at ~/
+        virtual_path = skill_path.relative_to(Path.home())
 
         # Build the prompt
         prompt_parts = [
@@ -125,7 +140,7 @@ class SkillCreatorAgent:
             f"",
             f"**Name**: {name}",
             f"**Description**: {description}",
-            f"**Output directory**: {skill_path}",
+            f"**Output directory**: /{virtual_path}",
         ]
 
         if context:
@@ -154,24 +169,64 @@ class SkillCreatorAgent:
             f"**Language Requirement**:",
             f"Detect the language used in the description and examples above.",
             f"Write ALL content (SKILL.md, comments, documentation) in the SAME language as the input.",
-            f"",
-            f"Please follow the skill-creator process:",
-            f"1. Understand the intent and ask clarifying questions if needed",
-            f"2. Create the SKILL.md with proper YAML frontmatter (name, description fields)",
-            f"3. Add any necessary bundled resources (scripts/, references/, assets/)",
-            f"",
-            f"Create the skill files in: {skill_path}",
         ])
 
-        prompt = "\n".join(prompt_parts)
-        prompt += (
-            f"\n\n**IMPORTANT**:"
-            f"\n- The optimization iteration loop (draft → test → evaluate → improve) must NOT exceed 20 iterations. Stop improving after 20 iterations even if results can still be improved."
-            f"\n- After creating ALL files, create an empty file named '_DONE' in {skill_path} to signal completion. Do NOT respond before creating _DONE."
-        )
+        if self.mode == "quick":
+            prompt_parts.extend([
+                f"",
+                f"**Mode: QUICK** — single-pass creation, no evaluation or iteration.",
+                f"",
+                f"Follow this process:",
+                f"1. Write a high-quality SKILL.md with proper YAML frontmatter (name, description fields)",
+                f"2. Write a thorough description field — this is the primary triggering mechanism, make it slightly 'pushy' so the skill triggers when it should",
+                f"3. Add any necessary bundled resources:",
+                f"   - scripts/ — if the skill needs executable code for repetitive tasks",
+                f"   - references/ — if the skill needs supplementary docs loaded on demand",
+                f"   - assets/ — if the skill needs templates, config files, or other static files",
+                f"4. Follow the skill-creator's Writing Guide and Writing Style sections for quality",
+                f"",
+                f"Explicitly SKIP all of the following — do NOT do any of these:",
+                f"- Do NOT create test cases, eval prompts, or evals/evals.json",
+                f"- Do NOT spawn subagents for test runs or baseline comparisons",
+                f"- Do NOT run any evaluation, grading, or benchmarking",
+                f"- Do NOT generate eval viewer or run generate_review.py",
+                f"- Do NOT run description optimization (run_loop.py, improve_description.py)",
+                f"- Do NOT re-read or re-edit files you just wrote — write it right the first time",
+                f"- Do NOT iterate — produce the best skill you can in a single pass",
+                f"- Do NOT use ls or glob to explore directories",
+                f"- Do NOT read any existing files unless you need to check something critical",
+                f"",
+                f"Create the skill files in: /{virtual_path}",
+            ])
+            prompt = "\n".join(prompt_parts)
+            prompt += (
+                f"\n\n**IMPORTANT**:"
+                f"\n- Minimize tool calls to the absolute minimum. Plan the complete file structure in your head first, then write each file once."
+                f"\n- Ideal flow: write_file(SKILL.md) → write_file(scripts/...) → write_file(references/...) → write_file(_DONE). That's 3-5 tool calls total."
+                f"\n- After creating ALL files, create an empty file named '_DONE' in /{virtual_path} to signal completion. Do NOT respond before creating _DONE."
+            )
+        else:
+            prompt_parts.extend([
+                f"",
+                f"Please follow the skill-creator process:",
+                f"1. Understand the intent and ask clarifying questions if needed",
+                f"2. Create the SKILL.md with proper YAML frontmatter (name, description fields)",
+                f"3. Add any necessary bundled resources (scripts/, references/, assets/)",
+                f"",
+                f"Create the skill files in: /{virtual_path}",
+            ])
+            prompt = "\n".join(prompt_parts)
+            prompt += (
+                f"\n\n**IMPORTANT**:"
+                f"\n- The optimization iteration loop (draft → test → evaluate → improve) must NOT exceed 20 iterations. Stop improving after 20 iterations even if results can still be improved."
+                f"\n- After creating ALL files, create an empty file named '_DONE' in /{virtual_path} to signal completion. Do NOT respond before creating _DONE."
+            )
 
         # Run the agent with astream to monitor _DONE file
         import asyncio
+        import logging
+
+        logger = logging.getLogger("skillforge.creator")
 
         done_marker = skill_path / "_DONE"
 
@@ -180,23 +235,72 @@ class SkillCreatorAgent:
                 "configurable": {"thread_id": f"skill-creation-{name}"},
                 "recursion_limit": self.max_iterations,
             }
-            async for _ in self.graph.astream(
+
+            # Debug: log the full prompt being sent
+            if self.verbose:
+                console.print(f"\n[dim]─── Agent Config ───[/dim]")
+                console.print(f"[dim]mode: {self.mode}[/dim]")
+                console.print(f"[dim]max_iterations: {self.max_iterations}[/dim]")
+                console.print(f"[dim]skill_path (real): {skill_path}[/dim]")
+                console.print(f"[dim]virtual_path: /{virtual_path}[/dim]")
+                console.print(f"[dim]model: {self.model_name}[/dim]")
+                console.print(f"[dim]─── User Prompt ({len(prompt)} chars) ───[/dim]")
+                console.print(f"[dim]{prompt[:500]}{'...' if len(prompt) > 500 else ''}[/dim]\n")
+
+            iteration = 0
+            async for event in self.graph.astream(
                 {"messages": [HumanMessage(content=prompt)]},
                 config=config,
                 stream_mode="updates",
             ):
+                iteration += 1
+                # Debug: log each iteration
+                agent_msg = None
+                tool_calls = []
+                for node_name, node_output in event.items():
+                    if hasattr(node_output, 'messages') and node_output.messages:
+                        last_msg = node_output.messages[-1]
+                        if hasattr(last_msg, 'content') and last_msg.content:
+                            agent_msg = last_msg.content[:200]
+                        if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                            tool_calls = [tc.get('name', '?') for tc in last_msg.tool_calls]
+
+                tc_str = f" tools: {tool_calls}" if tool_calls else ""
+                msg_str = f" msg: {agent_msg[:80]}..." if agent_msg and len(agent_msg) > 80 else f" msg: {agent_msg}" if agent_msg else ""
+                if self.verbose:
+                    console.print(f"[dim]  iter {iteration}: node={','.join(event.keys())}{tc_str}{msg_str}[/dim]")
+
                 # Exit as soon as _DONE marker appears
                 if done_marker.exists():
                     break
 
         timeout_occurred = False
+        max_retries = 3
+        retry_delay = 65  # seconds, wait for rate limit window to reset
+
         try:
-            await asyncio.wait_for(run_with_early_exit(), timeout=timeout)
-        except asyncio.TimeoutError:
-            timeout_occurred = True
-            console.print(f"[yellow]Warning: Skill creation timed out after {timeout} seconds[/yellow]")
-        except Exception as e:
-            console.print(f"[red]Error during skill creation: {e}[/red]")
+            for attempt in range(max_retries):
+                timeout_occurred = False
+                try:
+                    await asyncio.wait_for(run_with_early_exit(), timeout=timeout)
+                    break  # Success
+                except asyncio.TimeoutError:
+                    timeout_occurred = True
+                    console.print(f"[yellow]Warning: Skill creation timed out after {timeout} seconds[/yellow]")
+                    break  # Don't retry timeouts
+                except Exception as e:
+                    error_str = str(e)
+                    is_rate_limit = "429" in error_str or "rate" in error_str.lower() or "too many" in error_str.lower()
+                    if is_rate_limit and attempt < max_retries - 1:
+                        console.print(
+                            f"[yellow]Rate limited, waiting {retry_delay}s before retry "
+                            f"({attempt + 1}/{max_retries})...[/yellow]"
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    else:
+                        console.print(f"[red]Error during skill creation: {e}[/red]")
+                        break
         finally:
             # Clean up the marker file
             if done_marker.exists():
